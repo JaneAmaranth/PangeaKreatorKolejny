@@ -139,13 +139,35 @@ export default function CharacterCreator() {
   const [activeStat, setActiveStat] = useState(null);
 
   // --- symulator ---
-  const [rolledValues, setRolledValues] = useState([]);
-  const [simStats, setSimStats] = useState({ STR: null, DEX: null, PER: null, MAG: null, CHA: null });
-  const [locked, setLocked] = useState(false);
+   const [rolledValues, setRolledValues] = useState([]);
+  const emptyStats = { STR: null, DEX: null, PER: null, MAG: null, CHA: null };
+  const [simStatsList, setSimStatsList] = useState([ { ...emptyStats }, { ...emptyStats }, { ...emptyStats }, { ...emptyStats } ]);
+  const [lockedList, setLockedList] = useState([false, false, false, false]);
+  const [activeSet, setActiveSet] = useState(0);
+
   const [log, setLog] = useState([]);
+
   const [weapon, setWeapon] = useState("sword");
   const [defense, setDefense] = useState(12);
   const [enemyArmor, setEnemyArmor] = useState(2);
+  const [magicDefense, setMagicDefense] = useState(0);
+
+  // esencja (mana) w symulatorze — niezależna od kreatora
+  const [simEssence, setSimEssence] = useState(20);
+  const [selectedSpell, setSelectedSpell] = useState("");
+
+  const ENEMIES = [
+    { name: "Kultysta", defense: 12, armor: 1, mdef: 6 },
+    { name: "Wojownik", defense: 17, armor: 3, mdef: 1 },
+  ];
+  const [selectedEnemy, setSelectedEnemy] = useState(null);
+
+  const SPELLS = [
+    { id: "magic_missile", name: "Magiczny pocisk", cost: 3, dmgDie: 6, type: "damage", needsHit: true },
+    { id: "energy_burst", name: "Wybuch energii", cost: 5, dmgDie: 4, type: "damage", needsHit: true },
+    { id: "heal_seal", name: "Zasklepienie ran", cost: 5, dmgDie: 6, type: "heal", needsHit: false },
+    { id: "blind", name: "Oślepienie", cost: 8, type: "blind", needsHit: false },
+  ];
 
   // --- MAPA ---
   const [mapImage, setMapImage] = useState("");
@@ -397,27 +419,43 @@ export default function CharacterCreator() {
   };
 
   /* ====== Symulator – logika ====== */
-  function addLog(line) {
+  ffunction addLog(line) {
     const stamp = new Date().toLocaleTimeString();
-    setLog((prev) => [`[${stamp}] ${line}`, ...prev]);
+    setLog((prev) => [`[${stamp}] ${line}`, ...prev].slice(0, 200));
   }
+
   function rollFive() {
     const mods = [2, 1, 0, -1, -2];
     const rolls = mods.map((m) => d(6) + m);
     setRolledValues(rolls);
-    setSimStats({ STR: null, DEX: null, PER: null, MAG: null, CHA: null });
-    setLocked(false);
-    addLog(`Wylosowane wartości: ${rolls.map((v, i) => `${v}(${mods[i] >= 0 ? "+" : ""}${mods[i]})`).join(", ")}`);
+    setSimStatsList([{ ...emptyStats }, { ...emptyStats }, { ...emptyStats }, { ...emptyStats }]);
+    setLockedList([false, false, false, false]);
+    setActiveSet(0);
+    addLog(
+      `Wylosowane wartości: ${rolls
+        .map((v, i) => `${v}(${mods[i] >= 0 ? "+" : ""}${mods[i]})`)
+        .join(", ")}`
+    );
   }
-  function lockStats(values) {
+  function lockStatsFor(index, values) {
     if (Object.values(values).some((v) => v === null || v === "")) {
-      addLog("❌ Każda statystyka musi otrzymać wartość.");
+      addLog(`❌ Zestaw #${index + 1}: każda statystyka musi otrzymać wartość.`);
       return;
     }
-    setSimStats(values);
-    setLocked(true);
+    setSimStatsList((prev) => {
+      const copy = prev.slice();
+      copy[index] = Object.fromEntries(
+        Object.entries(values).map(([k, v]) => [k, Number(v)])
+      );
+      return copy;
+    });
+    setLockedList((prev) => {
+      const copy = prev.slice();
+      copy[index] = true;
+      return copy;
+    });
     addLog(
-      `✔️ Statystyki zatwierdzone: ${Object.entries(values)
+      `✔️ Zestaw #${index + 1} zatwierdzony: ${Object.entries(values)
         .map(([k, v]) => `${k} ${v} (mod ${statMod(Number(v))})`)
         .join(", ")}`
     );
@@ -629,76 +667,205 @@ export default function CharacterCreator() {
 
       {/* ====== SYMULATOR ====== */}
       {tab === "sim" && (
-        <div style={{ maxWidth: 1000, margin: "0 auto" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto" }}>
           <h1>⚔️ Symulator testu walki</h1>
-          <p>Rozdaj 5 rzutów k6 z modyfikatorami (+2, +1, 0, −1, −2), wybierz broń, podaj Obronę i Pancerz celu i wykonaj atak.</p>
+          <p>Rozdaj 5 rzutów k6 z modyfikatorami (+2, +1, 0, −1, −2). Wybierz broń lub rzuć zaklęcie, wybierz wroga po prawej i wykonaj akcję.</p>
 
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, marginTop: 12 }}>
-            <h2>1) Statystyki postaci</h2>
-            <button onClick={rollFive}>🎲 Rzuć 5×k6</button>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "2fr 1fr",
+              gap: 16,
+              marginTop: 16,
+              alignItems: "start",
+            }}
+          >
+            {/* LEWA KOLUMNA: Statystyki + Test walki */}
+            <div>
+              {/* STATYSTYKI — wspólne rzuty */}
+              <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, marginBottom: 16 }}>
+                <h2>1) Statystyki postaci (4 zestawy)</h2>
+                <button onClick={rollFive}>🎲 Rzuć 5×k6</button>
 
-            {rolledValues.length > 0 && (
-              <>
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {rolledValues.map((v, i) => (
-                    <span key={i} style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid #bbb", background: "#eee", fontSize: 12 }}>
-                      #{i + 1}: {v}
-                    </span>
+                {rolledValues.length > 0 && (
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {rolledValues.map((v, i) => (
+                      <span
+                        key={i}
+                        style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid #bbb", background: "#eee", fontSize: 12 }}
+                      >
+                        #{i + 1}: {v}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* 4 niezależne zestawy statystyk */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginTop: 12 }}>
+                  {simStatsList.map((stats, idx) => (
+                    <div key={idx} style={{ border: "1px solid #e5e5e5", borderRadius: 8, padding: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <strong>Zestaw #{idx + 1}</strong>
+                        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <input
+                            type="radio"
+                            name="activeSet"
+                            checked={activeSet === idx}
+                            onChange={() => setActiveSet(idx)}
+                          />
+                          Użyj tego zestawu
+                        </label>
+                      </div>
+
+                      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(5, 1fr)" }}>
+                        {["STR", "DEX", "PER", "MAG", "CHA"].map((k) => (
+                          <label key={k} style={{ display: "flex", flexDirection: "column", fontSize: 14 }}>
+                            {k}
+                            <input
+                              type="number"
+                              value={stats[k] ?? ""}
+                              disabled={lockedList[idx]}
+                              onChange={(e) =>
+                                setSimStatsList((prev) => {
+                                  const copy = prev.slice();
+                                  copy[idx] = { ...copy[idx], [k]: e.target.value === "" ? null : Number(e.target.value) };
+                                  return copy;
+                                })
+                              }
+                            />
+                            <small style={{ opacity: 0.7 }}>
+                              mod: {stats[k] != null ? statMod(Number(stats[k])) : "-"}
+                            </small>
+                          </label>
+                        ))}
+                      </div>
+
+                      <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                        <button onClick={() => lockStatsFor(idx, stats)} disabled={lockedList[idx]}>
+                          ✔️ Zatwierdź zestaw
+                        </button>
+                        {lockedList[idx] && <span style={{ fontSize: 12, color: "#2e7d32" }}>Zatwierdzony</span>}
+                      </div>
+                    </div>
                   ))}
                 </div>
+              </div>
 
-                <div style={{ marginTop: 12, display: "grid", gap: 8, gridTemplateColumns: "repeat(5, 1fr)" }}>
-                  {["STR", "DEX", "PER", "MAG", "CHA"].map((k) => (
-                    <label key={k} style={{ display: "flex", flexDirection: "column", fontSize: 14 }}>
-                      {k}
-                      <input
-                        type="number"
-                        value={simStats[k] ?? ""}
-                        onChange={(e) =>
-                          setSimStats((prev) => ({ ...prev, [k]: e.target.value === "" ? null : Number(e.target.value) }))
-                        }
-                      />
-                      <small style={{ opacity: 0.7 }}>mod: {simStats[k] != null ? statMod(Number(simStats[k])) : "-"}</small>
-                    </label>
-                  ))}
+              {/* TEST WALKI */}
+              <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+                <h2>2) Test walki</h2>
+
+                {/* BROŃ / OBRONA / PANCERZ */}
+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(3, 1fr)" }}>
+                  <label>
+                    Broń
+                    <select value={weapon} onChange={(e) => setWeapon(e.target.value)}>
+                      <option value="sword">Miecz krótki (Siła)</option>
+                      <option value="bow">Łuk (Spostrzegawczość)</option>
+                      <option value="staff">Kij magiczny (Magia)</option>
+                    </select>
+                  </label>
+                  <label>
+                    Obrona celu
+                    <input type="number" value={defense} onChange={(e) => setDefense(Number(e.target.value))} />
+                  </label>
+                  <label>
+                    Pancerz celu
+                    <input type="number" value={enemyArmor} onChange={(e) => setEnemyArmor(Number(e.target.value))} />
+                  </label>
                 </div>
 
                 <div style={{ marginTop: 8 }}>
-                  <button onClick={() => lockStats(simStats)}>✔️ Zatwierdź statystyki</button>
+                  <button onClick={doAttack}>⚔️ Wykonaj atak bronią</button>
                 </div>
-              </>
-            )}
-          </div>
 
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, marginTop: 12 }}>
-            <h2>2) Test ataku</h2>
-            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(3, 1fr)" }}>
-              <label>
-                Broń
-                <select value={weapon} onChange={(e) => setWeapon(e.target.value)}>
-                  <option value="sword">Miecz krótki (Siła)</option>
-                  <option value="bow">Łuk (Spostrzegawczość)</option>
-                  <option value="staff">Kij magiczny (Magia)</option>
-                </select>
-              </label>
-              <label>
-                Obrona celu
-                <input type="number" value={defense} onChange={(e) => setDefense(Number(e.target.value))} />
-              </label>
-              <label>
-                Pancerz celu
-                <input type="number" value={enemyArmor} onChange={(e) => setEnemyArmor(Number(e.target.value))} />
-              </label>
+                {/* ZAKLĘCIA */}
+                <div style={{ borderTop: "1px solid #eee", marginTop: 12, paddingTop: 12 }}>
+                  <h3>Zaklęcia</h3>
+                  <div style={{ display: "grid", gap: 12, gridTemplateColumns: "2fr 1fr 1fr" }}>
+                    <label>
+                      Zaklęcie
+                      <select value={selectedSpell} onChange={(e) => setSelectedSpell(e.target.value)}>
+                        <option value="">— wybierz zaklęcie —</option>
+                        {SPELLS.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} (koszt {s.cost})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Obrona przed magią
+                      <input
+                        type="number"
+                        value={magicDefense}
+                        onChange={(e) => setMagicDefense(Number(e.target.value))}
+                      />
+                    </label>
+                    <label>
+                      Esencja (max 20)
+                      <input
+                        type="number"
+                        value={simEssence}
+                        min={0}
+                        max={20}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          setSimEssence(Number.isFinite(v) ? Math.max(0, Math.min(20, v)) : 0);
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  <div style={{ marginTop: 8 }}>
+                    <button onClick={castSpell}>✨ Rzuć zaklęcie</button>
+                  </div>
+                </div>
+
+                {/* LOG */}
+                <div
+                  style={{
+                    background: "#111",
+                    color: "#eee",
+                    borderRadius: 6,
+                    padding: 10,
+                    marginTop: 12,
+                    maxHeight: 220,
+                    overflow: "auto",
+                    fontSize: 13,
+                  }}
+                >
+                  {log.map((line, i) => (
+                    <div key={i}>{line}</div>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            <div style={{ marginTop: 8 }}>
-              <button onClick={doAttack}>⚔️ Wykonaj atak</button>
-            </div>
+            {/* PRAWA KOLUMNA: Lista wrogów */}
+            <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+              <h2>Wrogowie</h2>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {ENEMIES.map((e) => (
+                  <div key={e.name} style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <strong>{e.name}</strong>
+                      <button onClick={() => selectEnemy(e)}>Wybierz</button>
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 14, lineHeight: 1.5 }}>
+                      <div>Obrona celu: <b>{e.defense}</b></div>
+                      <div>Pancerz celu: <b>{e.armor}</b></div>
+                      <div>Obrona przed magią: <b>{e.mdef}</b></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
 
-            <div style={{ background: "#111", color: "#eee", borderRadius: 6, padding: 10, marginTop: 12, maxHeight: 220, overflow: "auto", fontSize: 13 }}>
-              {log.map((line, i) => (
-                <div key={i}>{line}</div>
-              ))}
+              {selectedEnemy && (
+                <div style={{ marginTop: 12, fontSize: 12, color: "#555" }}>
+                  Aktualny wybór: <b>{selectedEnemy.name}</b>
+                </div>
+              )}
             </div>
           </div>
         </div>
