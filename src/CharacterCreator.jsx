@@ -139,7 +139,7 @@ export default function CharacterCreator() {
   const [activeStat, setActiveStat] = useState(null);
 
   // --- symulator ---
-   const [rolledValues, setRolledValues] = useState([]);
+  const [rolledValues, setRolledValues] = useState([]);
   const emptyStats = { STR: null, DEX: null, PER: null, MAG: null, CHA: null };
   const [simStatsList, setSimStatsList] = useState([ { ...emptyStats }, { ...emptyStats }, { ...emptyStats }, { ...emptyStats } ]);
   const [lockedList, setLockedList] = useState([false, false, false, false]);
@@ -152,7 +152,6 @@ export default function CharacterCreator() {
   const [enemyArmor, setEnemyArmor] = useState(2);
   const [magicDefense, setMagicDefense] = useState(0);
 
-  // esencja (mana) w symulatorze — niezależna od kreatora
   const [simEssence, setSimEssence] = useState(20);
   const [selectedSpell, setSelectedSpell] = useState("");
 
@@ -168,6 +167,148 @@ export default function CharacterCreator() {
     { id: "heal_seal", name: "Zasklepienie ran", cost: 5, dmgDie: 6, type: "heal", needsHit: false },
     { id: "blind", name: "Oślepienie", cost: 8, type: "blind", needsHit: false },
   ];
+
+  function addLog(line) {
+    const stamp = new Date().toLocaleTimeString();
+    setLog((prev) => [`[${stamp}] ${line}`, ...prev].slice(0, 200));
+  }
+
+  function rollFive() {
+    const mods = [2, 1, 0, -1, -2];
+    const rolls = mods.map((m) => d(6) + m);
+    setRolledValues(rolls);
+    setSimStatsList([{ ...emptyStats }, { ...emptyStats }, { ...emptyStats }, { ...emptyStats }]);
+    setLockedList([false, false, false, false]);
+    setActiveSet(0);
+    addLog(
+      `Wylosowane wartości: ${rolls
+        .map((v, i) => `${v}(${mods[i] >= 0 ? "+" : ""}${mods[i]})`)
+        .join(", ")}`
+    );
+  }
+
+  function lockStatsFor(index, values) {
+    if (Object.values(values).some((v) => v === null || v === "")) {
+      addLog(`❌ Zestaw #${index + 1}: każda statystyka musi otrzymać wartość.`);
+      return;
+    }
+    setSimStatsList((prev) => {
+      const copy = prev.slice();
+      copy[index] = Object.fromEntries(
+        Object.entries(values).map(([k, v]) => [k, Number(v)])
+      );
+      return copy;
+    });
+    setLockedList((prev) => {
+      const copy = prev.slice();
+      copy[index] = true;
+      return copy;
+    });
+    addLog(
+      `✔️ Zestaw #${index + 1} zatwierdzony: ${Object.entries(values)
+        .map(([k, v]) => `${k} ${v} (mod ${statMod(Number(v))})`)
+        .join(", ")}`
+    );
+  }
+
+  function lockStats(values) {
+    lockStatsFor(activeSet, values);
+  }
+
+  function selectEnemy(e) {
+    setSelectedEnemy(e);
+    setDefense(e.defense);
+    setEnemyArmor(e.armor);
+    setMagicDefense(e.mdef);
+    addLog(`🎯 Wybrano wroga: ${e.name} — Obrona ${e.defense}, Pancerz ${e.armor}, Obrona przed magią ${e.mdef}.`);
+  }
+
+  function doAttack() {
+    const stats = simStatsList[activeSet];
+    if (!lockedList[activeSet]) {
+      addLog(`❌ Najpierw zatwierdź statystyki wybranego zestawu (#${activeSet + 1}).`);
+      return;
+    }
+    const w = weaponData[weapon];
+    const usedVal =
+      w.stat === "STR" ? Number(stats.STR) || 0 :
+      w.stat === "PER" ? Number(stats.PER) || 0 :
+      Number(stats.MAG) || 0;
+
+    const toHitRoll = d(20);
+    const toHitTotal = toHitRoll + usedVal;
+    const hit = toHitTotal >= Number(defense);
+
+    addLog(`🗡️ Atak: ${w.name} (używa ${w.stat})`);
+    addLog(`• Rzut na trafienie: k20=${toHitRoll} + ${usedVal} = ${toHitTotal} vs Obrona ${defense} → ${hit ? "✅ TRAFIENIE" : "❌ PUDŁO"}`);
+
+    if (!hit) return;
+
+    const rawDie = d(w.dmgDie);
+    const mod = statMod(usedVal);
+    const raw = rawDie + mod;
+    const dmg = Math.max(0, raw - Number(enemyArmor));
+    addLog(`• Obrażenia: k${w.dmgDie}=${rawDie} + mod(${w.stat})=${mod} = ${raw}`);
+    addLog(`• Redukcja pancerza: −${enemyArmor}`);
+    addLog(`➡️ **Wynik obrażeń**: ${dmg}`);
+  }
+
+  function castSpell() {
+    const stats = simStatsList[activeSet];
+    if (!lockedList[activeSet]) {
+      addLog(`❌ Najpierw zatwierdź statystyki wybranego zestawu (#${activeSet + 1}).`);
+      return;
+    }
+    if (!selectedSpell) {
+      addLog("❌ Wybierz zaklęcie.");
+      return;
+    }
+
+    const spell = SPELLS.find((s) => s.id === selectedSpell);
+    if (!spell) {
+      addLog("❌ Nieznane zaklęcie.");
+      return;
+    }
+    if (simEssence < spell.cost) {
+      addLog(`❌ Za mało esencji: potrzebujesz ${spell.cost}, masz ${simEssence}.`);
+      return;
+    }
+
+    const MAG = Number(stats.MAG) || 0;
+    const toHitRoll = spell.needsHit ? d(20) : null;
+
+    addLog(`✨ Zaklęcie: ${spell.name} (koszt ${spell.cost} esencji)`);
+    setSimEssence((v) => Math.max(0, v - spell.cost));
+
+    if (spell.type === "damage") {
+      const toHitTotal = toHitRoll + MAG;
+      const hit = toHitTotal >= Number(defense);
+      addLog(`• Rzut na trafienie: k20=${toHitRoll} + MAG(${MAG}) = ${toHitTotal} vs Obrona ${defense} → ${hit ? "✅ TRAFIENIE" : "❌ PUDŁO"}`);
+      if (!hit) return;
+
+      const rawDie = d(spell.dmgDie);
+      const mod = statMod(MAG);
+      const raw = rawDie + mod;
+      const afterMDef = Math.max(0, raw - Number(magicDefense));
+      addLog(`• Obrażenia: k${spell.dmgDie}=${rawDie} + mod(MAG)=${mod} = ${raw}`);
+      addLog(`• Obrona przed magią: −${magicDefense}`);
+      addLog(`➡️ **Wynik obrażeń magicznych**: ${afterMDef}`);
+      return;
+    }
+
+    if (spell.type === "heal") {
+      const healDie = d(spell.dmgDie);
+      addLog(`• Leczenie: k6=${healDie}`);
+      addLog(`➡️ **Wyleczono**: ${healDie} punktów obrażeń`);
+      return;
+    }
+
+    if (spell.type === "blind") {
+      addLog("• Efekt: Oślepienie (ustalcie dokładne działanie w zasadach).");
+      addLog("➡️ Zaklęcie zadziałało — brak rzutów na obrażenia.");
+      return;
+    }
+  }
 
   // --- MAPA ---
   const [mapImage, setMapImage] = useState("");
@@ -376,7 +517,6 @@ export default function CharacterCreator() {
     setPanX(0);
     setPanY(0);
   };
-
   /* ====== Kreator – handlery ====== */
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -417,67 +557,6 @@ export default function CharacterCreator() {
       return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
     });
   };
-
-  /* ====== Symulator – logika ====== */
-  ffunction addLog(line) {
-    const stamp = new Date().toLocaleTimeString();
-    setLog((prev) => [`[${stamp}] ${line}`, ...prev].slice(0, 200));
-  }
-
-  function rollFive() {
-    const mods = [2, 1, 0, -1, -2];
-    const rolls = mods.map((m) => d(6) + m);
-    setRolledValues(rolls);
-    setSimStatsList([{ ...emptyStats }, { ...emptyStats }, { ...emptyStats }, { ...emptyStats }]);
-    setLockedList([false, false, false, false]);
-    setActiveSet(0);
-    addLog(
-      `Wylosowane wartości: ${rolls
-        .map((v, i) => `${v}(${mods[i] >= 0 ? "+" : ""}${mods[i]})`)
-        .join(", ")}`
-    );
-  }
-  function lockStatsFor(index, values) {
-    if (Object.values(values).some((v) => v === null || v === "")) {
-      addLog(`❌ Zestaw #${index + 1}: każda statystyka musi otrzymać wartość.`);
-      return;
-    }
-    setSimStatsList((prev) => {
-      const copy = prev.slice();
-      copy[index] = Object.fromEntries(
-        Object.entries(values).map(([k, v]) => [k, Number(v)])
-      );
-      return copy;
-    });
-    setLockedList((prev) => {
-      const copy = prev.slice();
-      copy[index] = true;
-      return copy;
-    });
-    addLog(
-      `✔️ Zestaw #${index + 1} zatwierdzony: ${Object.entries(values)
-        .map(([k, v]) => `${k} ${v} (mod ${statMod(Number(v))})`)
-        .join(", ")}`
-    );
-  }
-  function doAttack() {
-    if (!locked) {
-      addLog("❌ Najpierw zatwierdź statystyki.");
-      return;
-    }
-    const w = weaponData[weapon];
-    const used = w.stat === "STR" ? Number(simStats.STR) : w.stat === "PER" ? Number(simStats.PER) : Number(simStats.MAG);
-    const toHitRoll = d(20);
-    const toHitTotal = toHitRoll + used;
-    const success = toHitTotal >= Number(defense);
-    addLog(`Atak: ${w.name} (używa ${w.stat}). k20=${toHitRoll} + ${used} = ${toHitTotal} vs Obrona ${defense} → ${success ? "✅ TRAFIENIE" : "❌ PUDŁO"}`);
-    if (!success) return;
-    const rawDie = d(w.dmgDie);
-    const mod = statMod(used);
-    const raw = rawDie + mod;
-    const dmg = Math.max(0, raw - Number(enemyArmor));
-    addLog(`Obrażenia: k${w.dmgDie}=${rawDie} + mod=${mod} = ${raw} − pancerz ${enemyArmor} → ${dmg}.`);
-  }
 
   /* ====== UI – zakładki ====== */
   const Tabs = () => (
@@ -666,7 +745,7 @@ export default function CharacterCreator() {
       )}
 
       {/* ====== SYMULATOR ====== */}
-      {tab === "sim" && (
+{tab === "sim" && (
         <div style={{ maxWidth: 1200, margin: "0 auto" }}>
           <h1>⚔️ Symulator testu walki</h1>
           <p>Rozdaj 5 rzutów k6 z modyfikatorami (+2, +1, 0, −1, −2). Wybierz broń lub rzuć zaklęcie, wybierz wroga po prawej i wykonaj akcję.</p>
@@ -1029,3 +1108,4 @@ export default function CharacterCreator() {
     </div>
   );
 }
+
