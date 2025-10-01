@@ -34,46 +34,45 @@ const enemyTypes = {
   }
 };
 
-/* ===== Postać gracza ===== */
 const makeChar = () => ({
   name: "",
   race: "Człowiek",
   clazz: "Wojownik",
 
   STR: null, DEX: null, PER: null, MAG: null, CHA: null,
-  armor: 0, magicDefense: 0, defense: 0,
+  armor: 0, magicDefense: 0,
 
   hp: 20, maxHp: 20,
   essence: 20, maxEssence: 20,
 
   actionsLeft: 2,
 
-  // Rasowe (niezależne)
+  // Rasowe: Człowiek
   humanCharges: [false, false, false, false, false],
-  humanBuff: null,               // { type:'dmg'|'tohit', expiresTurn:number } ; HP to natychmiast +2
-  humanPendingIdx: null,
+  humanBuff: null,
   humanPendingChoice: "dmg",
 
+  // Rasowe: Elf
   elfChargeUsed: false,
   elfChargedTurn: null,
 
+  // Rasowe: Krasnolud
   dwarfPassiveArmed: false,
   dwarfHibernating: false,
   dwarfHibernateTurns: 0,
 
-  faeykaiChargesLeft: 3,         // 3× błog./klątwa
-  faeykaiPending: null,          // { mode, targetKind, playerIndex, enemyId }
-  faeykaiMaskBroken: false,      // pęknięta maska => −3 do trafienia zaklęciami
-  faeykaiOutsideHomeland: true,  // flaga informacyjna (nie wpływa na karę — tylko maska −3)
+  // Rasowe: Faeykai
+  faeykaiChargesLeft: 3,      // błogosławieństwo/przekleństwo (3/odpoczynek)
+  faeykaiMaskBroken: false,   // czy maska pękła
+  faeykaiOutsideHomeland: true,
+  effects: [],
 
-  effects: [],                   // [{type:'bless', value:3, turnsLeft:3},{type:'curseToHit',value:3,turnsLeft:3},{type:'buffToHit',value:4,turnsLeft:1}]
-
-  // Klasowe (raz na odpoczynek)
+  // Klasowe
   classUsed: false,
-  warriorReady: false,  // full dmg, ignoruje armor (po trafieniu)
-  archerReady: false,   // auto-hit łukiem + DEF celu −5/3t
-  shooterReady: false,  // po trafieniu: armor celu −50%/3t
-  mageReady: false,     // po czarze tarcza = 50% dmg
+  warriorReady: false,
+  archerReady: false,
+  shooterReady: false,
+  mageReady: false,
   mageShield: 0,
 });
 
@@ -719,115 +718,180 @@ const castPlayerSpell = () => {
 };
 
 /* ===================== Funkcje ataków wroga ===================== */
-  const doEnemyAttackWeapon = (enemyId, weaponKey, targetPlayerIndex) => {
-    setEnemies(prev => {
-      const n = [...prev];
-      const e = n.find(x => x.id === enemyId);
-      if (!e) return prev;
+ const doEnemyAttackWeapon = (enemyId, weaponKey, targetPlayerIndex) => {
+  setEnemies(prev => {
+    const n = [...prev];
+    const e = n.find(x => x.id === enemyId);
+    if (!e) return prev;
 
-      const weapon = weaponData[weaponKey];
-      const roll20 = d(20);
-      const target = sets[targetPlayerIndex];
-      const effDefense = target ? target.armor + 10 : 10;
-      const toHit = roll20 + statMod(e[weapon.stat] || 0);
+    const weapon = weaponData[weaponKey];
+    const roll20 = d(20);
+    const target = sets[targetPlayerIndex];
+    const effDefense = target ? target.armor + 10 : 10;
+    const toHit = roll20 + statMod(e[weapon.stat] || 0);
 
-      const lines = [];
-      lines.push(`🎯 Wróg ${e.name} atakuje ${target?.name || `Postać ${targetPlayerIndex+1}`} bronią ${weapon.name}`);
-      lines.push(`   Trafienie: k20=${roll20} + mod = ${toHit} vs Obrona ${effDefense}`);
+    const lines = [];
+    lines.push(`🎯 Wróg ${e.name} atakuje ${target?.name || `Postać ${targetPlayerIndex+1}`} bronią ${weapon.name}`);
+    lines.push(`   Trafienie: k20=${roll20} + mod = ${toHit} vs Obrona ${effDefense}`);
 
-      if (toHit >= effDefense) {
-        const dmgRoll = d(weapon.dmgDie);
-        const dmg = Math.max(0, dmgRoll - target.armor);
-        lines.push(`   Obrażenia: k${weapon.dmgDie}=${dmgRoll} - Pancerz(${target.armor}) = ${dmg}`);
-        setSets(prevSets => {
-          const s = [...prevSets];
-          s[targetPlayerIndex] = { ...s[targetPlayerIndex], hp: Math.max(0, s[targetPlayerIndex].hp - dmg) };
-          return s;
-        });
-      } else {
-        lines.push(`❌ Pudło!`);
-      }
-      addLog(lines.join("\n"));
-      return n;
-    });
-  };
+    if (toHit >= effDefense) {
+      const dmgRoll = d(weapon.dmgDie);
+      const dmg = Math.max(0, dmgRoll - target.armor);
+      lines.push(`   Obrażenia: k${weapon.dmgDie}=${dmgRoll} - Pancerz(${target.armor}) = ${dmg}`);
 
-  const doEnemySpellAuto = (enemyId, spellName, targetPlayerIndex) => {
-    setEnemies(prev => {
-      const n = [...prev];
-      const e = n.find(x => x.id === enemyId);
-      if (!e) return prev;
+      setSets(prevSets => {
+        const s = [...prevSets];
+        const t = { ...s[targetPlayerIndex] };
+        const beforeHp = t.hp || 0;
+        t.hp = Math.max(0, beforeHp - dmg);
 
-      const lines = [];
-      lines.push(`🪄 Wróg ${e.name} rzuca zaklęcie ${spellName}`);
+        // 🔹 Sprawdzenie pęknięcia maski Faeykai
+        if (t.race === "Faeykai") {
+          const thr = Math.ceil((t.maxHp || 20) * 0.21);
+          if (!t.faeykaiMaskBroken && t.hp < thr) {
+            t.faeykaiMaskBroken = true;
+            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
+          }
+        }
 
-      if (spellName === "Mroczny Pakt") {
-        if (e.essence < 2) { lines.push("❌ Brak esencji"); return n; }
-        e.essence -= 2;
-        setSets(prevSets => {
-          const s = [...prevSets];
-          s[targetPlayerIndex] = { ...s[targetPlayerIndex], hp: Math.max(0, s[targetPlayerIndex].hp - 4) };
-          return s;
-        });
-        e.toHit += 4;
-        lines.push(`   Cel traci 4 HP, ${e.name} zyskuje +4 do trafienia.`);
-      }
+        s[targetPlayerIndex] = t;
+        return s;
+      });
+    } else {
+      lines.push(`❌ Pudło!`);
+    }
 
-      if (spellName === "Wyssanie życia") {
-        if (e.essence < 5) { lines.push("❌ Brak esencji"); return n; }
-        e.essence -= 5;
-        setSets(prevSets => {
-          const s = [...prevSets];
-          s[targetPlayerIndex] = { ...s[targetPlayerIndex], hp: Math.max(0, s[targetPlayerIndex].hp - 5) };
-          return s;
-        });
-        e.hp = Math.min(e.maxHp, e.hp + 5);
-        lines.push(`   Cel traci 5 HP, ${e.name} odzyskuje 5 HP.`);
-      }
+    addLog(lines.join("\n"));
+    return n;
+  });
+};
 
-      if (spellName === "Magiczny pocisk") {
-        if (e.essence < 3) { lines.push("❌ Brak esencji"); return n; }
-        e.essence -= 3;
-        const dmgRoll = d(6);
-        setSets(prevSets => {
-          const s = [...prevSets];
-          s[targetPlayerIndex] = { ...s[targetPlayerIndex], hp: Math.max(0, s[targetPlayerIndex].hp - dmgRoll) };
-          return s;
-        });
-        lines.push(`   Magiczny pocisk trafia za ${dmgRoll} obrażeń.`);
-      }
+const doEnemySpellAuto = (enemyId, spellName, targetPlayerIndex) => {
+  setEnemies(prev => {
+    const n = [...prev];
+    const e = n.find(x => x.id === enemyId);
+    if (!e) return prev;
 
-      addLog(lines.join("\n"));
-      return n;
-    });
-  };
+    const lines = [];
+    lines.push(`🪄 Wróg ${e.name} rzuca zaklęcie ${spellName}`);
 
-  const doSpyAOE = (enemyId, targetPlayerIndices) => {
-    setEnemies(prev => {
-      const n = [...prev];
-      const e = n.find(x => x.id === enemyId);
-      if (!e) return prev;
+    if (spellName === "Mroczny Pakt") {
+      if (e.essence < 2) { lines.push("❌ Brak esencji"); return n; }
+      e.essence -= 2;
+      setSets(prevSets => {
+        const s = [...prevSets];
+        const t = { ...s[targetPlayerIndex] };
+        t.hp = Math.max(0, t.hp - 4);
+        
+        // 🔹 Faeykai mask check
+        if (t.race === "Faeykai") {
+          const thr = Math.ceil((t.maxHp || 20) * 0.21);
+          if (!t.faeykaiMaskBroken && t.hp < thr) {
+            t.faeykaiMaskBroken = true;
+            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
+          }
+        }
 
-      const lines = [];
-      lines.push(`💥 Szpieg ${e.name} rzuca Wybuch Energii!`);
+        s[targetPlayerIndex] = t;
+        return s;
+      });
+      e.toHit += 4;
+      lines.push(`   Cel traci 4 HP, ${e.name} zyskuje +4 do trafienia.`);
+    }
 
+    if (spellName === "Wyssanie życia") {
       if (e.essence < 5) { lines.push("❌ Brak esencji"); return n; }
       e.essence -= 5;
+      setSets(prevSets => {
+        const s = [...prevSets];
+        const t = { ...s[targetPlayerIndex] };
+        t.hp = Math.max(0, t.hp - 5);
 
-      targetPlayerIndices.forEach(idx => {
-        const dmgRoll = d(4);
-        setSets(prevSets => {
-          const s = [...prevSets];
-          s[idx] = { ...s[idx], hp: Math.max(0, s[idx].hp - dmgRoll) };
-          return s;
-        });
-        lines.push(`   Postać ${idx+1} otrzymuje ${dmgRoll} obrażeń.`);
+        // 🔹 Faeykai mask check
+        if (t.race === "Faeykai") {
+          const thr = Math.ceil((t.maxHp || 20) * 0.21);
+          if (!t.faeykaiMaskBroken && t.hp < thr) {
+            t.faeykaiMaskBroken = true;
+            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
+          }
+        }
+
+        s[targetPlayerIndex] = t;
+        return s;
       });
+      e.hp = Math.min(e.maxHp, e.hp + 5);
+      lines.push(`   Cel traci 5 HP, ${e.name} odzyskuje 5 HP.`);
+    }
 
-      addLog(lines.join("\n"));
-      return n;
+    if (spellName === "Magiczny pocisk") {
+      if (e.essence < 3) { lines.push("❌ Brak esencji"); return n; }
+      e.essence -= 3;
+      const dmgRoll = d(6);
+      setSets(prevSets => {
+        const s = [...prevSets];
+        const t = { ...s[targetPlayerIndex] };
+        t.hp = Math.max(0, t.hp - dmgRoll);
+
+        // 🔹 Faeykai mask check
+        if (t.race === "Faeykai") {
+          const thr = Math.ceil((t.maxHp || 20) * 0.21);
+          if (!t.faeykaiMaskBroken && t.hp < thr) {
+            t.faeykaiMaskBroken = true;
+            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
+          }
+        }
+
+        s[targetPlayerIndex] = t;
+        return s;
+      });
+      lines.push(`   Magiczny pocisk trafia za ${dmgRoll} obrażeń.`);
+    }
+
+    addLog(lines.join("\n"));
+    return n;
+  });
+};
+
+const doSpyAOE = (enemyId, targetPlayerIndices) => {
+  setEnemies(prev => {
+    const n = [...prev];
+    const e = n.find(x => x.id === enemyId);
+    if (!e) return prev;
+
+    const lines = [];
+    lines.push(`💥 Szpieg ${e.name} rzuca Wybuch Energii!`);
+
+    if (e.essence < 5) { lines.push("❌ Brak esencji"); return n; }
+    e.essence -= 5;
+
+    targetPlayerIndices.forEach(idx => {
+      const dmgRoll = d(4);
+      setSets(prevSets => {
+        const s = [...prevSets];
+        const t = { ...s[idx] };
+        const beforeHp = t.hp || 0;
+        t.hp = Math.max(0, beforeHp - dmgRoll);
+
+        // 🔹 Faeykai mask check
+        if (t.race === "Faeykai") {
+          const thr = Math.ceil((t.maxHp || 20) * 0.21);
+          if (!t.faeykaiMaskBroken && t.hp < thr) {
+            t.faeykaiMaskBroken = true;
+            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
+          }
+        }
+
+        s[idx] = t;
+        return s;
+      });
+      lines.push(`   Postać ${idx+1} otrzymuje ${dmgRoll} obrażeń.`);
     });
-  };
+
+    addLog(lines.join("\n"));
+    return n;
+  });
+};
+
   /* ===================== JSX: Layout główny ===================== */
   return (
     <div style={{ padding: 16 }}>
