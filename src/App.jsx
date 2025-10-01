@@ -17,7 +17,7 @@ const weaponData = {
   sword:  { name: "Miecz krótki", stat: "STR", dmgDie: 6, type: "physical" },
   bow:    { name: "Łuk",          stat: "PER", dmgDie: 6, type: "physical" },
   musket: { name: "Muszkiet",     stat: "PER", dmgDie: 6, type: "physical" },
-  staff:  { name: "Kij magiczny", stat: "MAG", dmgDie: 4, type: "physical" }, // trafienie traktujemy jak fizyczne
+  staff:  { name: "Kij magiczny", stat: "MAG", dmgDie: 4, type: "physical" }, // nośnik traktowany jako fizyczny
 };
 
 const ENEMIES = [
@@ -32,7 +32,7 @@ const SPELLS = {
   "Oślepienie":      { key: "blind",   cost: 8, needsToHit: false, type: "effect" },
 };
 
-const RACES = ["Człowiek", "Elf", "Krasnolud", "Faeykai"];
+const RACES   = ["Człowiek", "Elf", "Krasnolud", "Faeykai"];
 const CLASSES = ["Wojownik", "Łucznik", "Strzelec", "Mag", "Dyplomata"];
 
 /* ===== Komponent ===== */
@@ -89,21 +89,23 @@ export default function BattleSimulator() {
   const [selectedSpellName, setSelectedSpellName] = useState("Magiczny pocisk");
   const [healTarget, setHealTarget] = useState(0);
 
-  // Dyplomata: wybór wroga i celu przy aktywacji
-  const [diploEnemy, setDiploEnemy] = useState("cultist");
-  const [diploTarget, setDiploTarget] = useState(0);
+  /* Dyplomata – nowe UI: źródło + rodzaj celu + cel (gracz/wróg) */
+  const [diplomacySourceEnemy, setDiplomacySourceEnemy] = useState("cultist");
+  const [diplomacyTargetType, setDiplomacyTargetType] = useState("player"); // 'player' | 'enemy'
+  const [diplomacyTargetPlayer, setDiplomacyTargetPlayer] = useState(0);
+  const [diplomacyTargetEnemy, setDiplomacyTargetEnemy] = useState("warrior");
 
   const [chosenEnemyId, setChosenEnemyId] = useState("cultist");
   const [enemyStates, setEnemyStates] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: e.hp }), {}));
 
   // Efekty na wrogach
   const [enemyStun, setEnemyStun] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: 0 }), {}));
-  const [enemyCurse, setEnemyCurse] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: 0 }), {})); // +3 do progu trafienia
+  const [enemyCurse, setEnemyCurse] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: 0 }), {})); // +3 do progu trafienia (utrudnienie dla wroga)
   const [enemyDefenseDebuff, setEnemyDefenseDebuff] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: { value: 0, turns: 0 } }), {})); // -5, 3 tury
   const [enemyArmorDebuff, setEnemyArmorDebuff] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: { factor: 1, turns: 0 } }), {})); // x0.5, 3 tury
 
-  // Dyplomata: wymuszenie celu (jednorazowe)
-  const [forcedTarget, setForcedTarget] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: null }), {})); // { enemyId: playerIndex | null }
+  // Dyplomata – wymuszenia: mapuje enemyId -> { kind:'player', target:number } | { kind:'enemy', target:string }
+  const [forcedOrders, setForcedOrders] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: null }), {}));
 
   // Revive dropdown per postać
   const [reviveTargetIndex, setReviveTargetIndex] = useState([null, null, null, null]);
@@ -124,9 +126,10 @@ export default function BattleSimulator() {
         ? val
         : (val === "" ? null : Number(val));
       next[i] = { ...next[i], [key]: parsed };
+      // Faeykai – maska <21%
       if (key === "hp" && next[i].race === "Faeykai") {
         const s = next[i];
-        const thresh = Math.ceil((s.maxHp || 20) * 0.1);
+        const thresh = Math.ceil((s.maxHp || 20) * 0.21);
         if ((s.hp || 0) < thresh) next[i].faeykaiMaskBroken = true;
       }
       return next;
@@ -171,7 +174,7 @@ export default function BattleSimulator() {
     setEnemyCurse(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: 0 }), {}));
     setEnemyDefenseDebuff(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: { value: 0, turns: 0 } }), {}));
     setEnemyArmorDebuff(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: { factor: 1, turns: 0 } }), {}));
-    setForcedTarget(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: null }), {}));
+    setForcedOrders(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: null }), {}));
     addLog("🧹 Zresetowano efekty na wrogach (ogłuszenia, przekleństwa, debuffy, wymuszenia celu).");
   };
 
@@ -431,10 +434,13 @@ export default function BattleSimulator() {
     }
 
     if (c.clazz === "Dyplomata") {
-      // wymagamy wyboru wroga i celu (postać)
-      const enemyId = diploEnemy;
-      const targetIdx = diploTarget;
-      setForcedTarget((prev) => ({ ...prev, [enemyId]: targetIdx }));
+      const src = diplomacySourceEnemy;
+      const order =
+        diplomacyTargetType === "player"
+          ? { kind: "player", target: diplomacyTargetPlayer }
+          : { kind: "enemy", target: diplomacyTargetEnemy };
+
+      setForcedOrders((prev) => ({ ...prev, [src]: order }));
       setSets((prev) => {
         const next = [...prev];
         const me = { ...next[i] };
@@ -443,7 +449,13 @@ export default function BattleSimulator() {
         next[i] = me;
         return next;
       });
-      addLog(`🗣️ Dyplomata (Postać ${i + 1}) zmusza wroga ${enemyId} do zaatakowania Postaci ${targetIdx + 1} przy jego następnym ataku.`);
+
+      const targetLabel =
+        order.kind === "player"
+          ? `Postać ${order.target + 1}`
+          : ENEMIES.find((e) => e.id === order.target)?.name || order.target;
+
+      addLog(`🗣️ Dyplomata (Postać ${i + 1}) wymusza: ${src} zaatakuje ${targetLabel} przy swoim następnym ataku.`);
       return;
     }
   };
@@ -598,7 +610,6 @@ export default function BattleSimulator() {
         const caster = { ...next[activeSet] };
         const target = { ...next[healTarget] };
 
-        // caster.essence — już odjęliśmy
         target.hp = Math.min(target.maxHp ?? 20, (target.hp ?? 0) + rollHeal);
 
         next[activeSet] = caster;
@@ -617,19 +628,79 @@ export default function BattleSimulator() {
     addLog(lines.concat("🌑 Efekt zaklęcia zastosowany.").join("\n"));
   };
 
-  /* ===== ATAK WROGA ===== */
+  /* ===== Dyplomata: wróg atakuje wroga ===== */
+  const doEnemyVsEnemyAttack = (attackerId, targetId) => {
+    const attacker = getEnemyBase(attackerId);
+    const target   = getEnemyBase(targetId);
+    if (!attacker || !target) return;
+
+    // jeżeli ogłuszony — nie atakuje
+    if ((enemyStun[attacker.id] || 0) > 0) {
+      addLog(`🌀 ${attacker.name} jest ogłuszony i nie może zaatakować ${target.name}.`);
+      return;
+    }
+
+    const roll20 = d(20);
+    const toHitNeed = attacker.toHit + (enemyCurse[attacker.id] > 0 ? 3 : 0);
+    const hit = roll20 >= toHitNeed;
+
+    let lines = [`🤺 ${attacker.name} → ${target.name}`];
+    lines.push(`🎲 Trafienie: k20=${roll20} vs próg ${toHitNeed}${enemyCurse[attacker.id] > 0 ? " (przeklęty +3)" : ""} → ${hit ? "✅" : "❌"}`);
+
+    if (!hit) return addLog(lines.join("\n"));
+
+    let dmgRoll = d(attacker.dmgDie);
+    let dmg = dmgRoll;
+    if (attacker.dmgType === "magiczny") {
+      dmg = Math.max(0, dmgRoll - target.magicDefense);
+      lines.push(`💥 Obrażenia: k${attacker.dmgDie}=${dmgRoll} − Obrona magii(${target.magicDefense}) = ${dmg}`);
+    } else {
+      // uwzględnij ewentualny debuff pancerza na celu
+      const effArmor = effectiveEnemyArmor(target.id);
+      dmg = Math.max(0, dmgRoll - effArmor);
+      lines.push(`💥 Obrażenia: k${attacker.dmgDie}=${dmgRoll} − Pancerz(${effArmor}) = ${dmg}`);
+    }
+
+    if (dmg > 0) {
+      setEnemyStates((prev) => {
+        const next = { ...prev };
+        next[target.id] = Math.max(0, (next[target.id] ?? target.hp) - dmg);
+        return next;
+      });
+    }
+
+    addLog(lines.join("\n"));
+  };
+
+  /* ===== ATAK WROGA → GRACZA (z obsługą wymuszeń Dyplomaty) ===== */
   const enemyAttack = () => {
     const enemy = getEnemyBase(chosenEnemyId);
     if (!enemy) return addLog("❌ Nie wybrano wroga.");
 
-    // cel: wymuszenie dyplomaty?
-    const forced = forcedTarget[enemy.id];
-    const targetIndex = typeof forced === "number" ? forced : activeSet;
+    // jeśli jest wymuszenie typu „wróg→wróg”
+    const order = forcedOrders[enemy.id];
+    if (order && order.kind === "enemy") {
+      addLog(`🗣️ ${enemy.name} (pod wpływem Dyplomaty) atakuje wroga: ${
+        ENEMIES.find((e) => e.id === order.target)?.name || order.target
+      }`);
+      doEnemyVsEnemyAttack(enemy.id, order.target);
+      // skonsumuj wymuszenie
+      setForcedOrders((prev) => ({ ...prev, [enemy.id]: null }));
+      return;
+    }
+
+    // CEL: gracz wymuszony przez Dyplomatę? (wróg→gracz)
+    const targetIndex =
+      order && order.kind === "player" ? order.target : activeSet;
     const target = sets[targetIndex];
 
     // ogłuszenie?
     if ((enemyStun[enemy.id] || 0) > 0) {
       addLog(`🌀 ${enemy.name} jest ogłuszony (pozostało ${enemyStun[enemy.id]} tur).`);
+      // skonsumuj ewentualne wymuszenie wróg→gracz (jednorazowe)
+      if (order && order.kind === "player") {
+        setForcedOrders((prev) => ({ ...prev, [enemy.id]: null }));
+      }
       return;
     }
 
@@ -637,10 +708,10 @@ export default function BattleSimulator() {
     let lines = [`👹 Wróg: ${enemy.name} → cel: Postać ${targetIndex + 1}`];
     const roll20 = d(20);
     const hit = roll20 >= toHitNeed;
-    lines.push(`🎲 Trafienie: k20=${roll20} vs próg ${toHitNeed}${enemyCurse[enemy.id] > 0 ? " (przekleństwo +3)" : ""} → ${hit ? "✅" : "❌"}`);
+    lines.push(`🎲 Trafienie: k20=${roll20} vs próg ${toHitNeed}${enemyCurse[enemy.id] > 0 ? " (przeklęstwo +3)" : ""} → ${hit ? "✅" : "❌"}`);
 
     if (!hit) {
-      if (typeof forced === "number") setForcedTarget((prev) => ({ ...prev, [enemy.id]: null }));
+      if (order && order.kind === "player") setForcedOrders((prev) => ({ ...prev, [enemy.id]: null }));
       return addLog(lines.join("\n"));
     }
 
@@ -648,69 +719,69 @@ export default function BattleSimulator() {
     let incoming = d(enemy.dmgDie);
     lines.push(`💥 Rzut na obrażenia: k${enemy.dmgDie}=${incoming}`);
 
-    let reflected = 0;
-
     // krasnolud w hibernacji — ignoruje obrażenia
     if (target.dwarfHibernating) {
       lines.push(`🛌 Cel w hibernacji — obrażenia zignorowane.`);
-    } else {
-      // redukcje
-      if (enemy.dmgType === "magiczny") {
-        incoming = Math.max(0, incoming - Number(target.magicDefense ?? 0));
-        lines.push(`🛡️ Redukcja: − Obrona magii (${target.magicDefense}) → ${incoming}`);
-      } else {
-        incoming = Math.max(0, incoming - Number(target.armor ?? 0));
-        lines.push(`🛡️ Redukcja: − Pancerz (${target.armor}) → ${incoming}`);
-      }
-
-      // tarcza maga (jeżeli cel ma)
-      if ((target.mageShield || 0) > 0) {
-        const use = Math.min(target.mageShield, incoming);
-        reflected = use;
-        incoming = Math.max(0, incoming - use);
-
-        setSets((prev) => {
-          const next = [...prev];
-          const t = { ...next[targetIndex] };
-          t.mageShield = Math.max(0, (t.mageShield || 0) - use);
-          next[targetIndex] = t;
-          return next;
-        });
-
-        lines.push(`🔮 Tarcza Maga: −${use} obrażeń, odbija ${use} we wroga.`);
-        if (reflected > 0) damageEnemy(enemy.id, reflected);
-      }
-
-      // zadaj obrażenia celowi
-      if (incoming > 0) {
-        setSets((prev) => {
-          const next = [...prev];
-          const cur = { ...next[targetIndex] };
-          const before = cur.hp ?? 0;
-          cur.hp = Math.max(0, before - incoming);
-
-          // Faeykai: maska pęka poniżej 10%
-          if (cur.race === "Faeykai") {
-            const thresh = Math.ceil((cur.maxHp || 20) * 0.1);
-            if (cur.hp < thresh) cur.faeykaiMaskBroken = true;
-          }
-
-          // Krasnolud: jeśli uzbrojony i spadnie do 0 → hibernacja 2 tury
-          if (cur.race === "Krasnolud" && cur.dwarfPassiveArmed && before > 0 && cur.hp <= 0) {
-            cur.dwarfHibernating = true;
-            cur.dwarfHibernateTurns = 2;
-            lines.push(`🛡️ Krasnolud: wchodzi w hibernację na 2 tury (niewrażliwy).`);
-          }
-
-          next[targetIndex] = cur;
-          return next;
-        });
-        lines.push(`❤️ HP Postaci ${targetIndex + 1} −${incoming}`);
-      }
+      if (order && order.kind === "player") setForcedOrders((prev) => ({ ...prev, [enemy.id]: null }));
+      return addLog(lines.join("\n"));
     }
 
-    // skonsumuj jednorazowe wymuszenie celu
-    if (typeof forced === "number") setForcedTarget((prev) => ({ ...prev, [enemy.id]: null }));
+    // redukcje
+    if (enemy.dmgType === "magiczny") {
+      incoming = Math.max(0, incoming - Number(target.magicDefense ?? 0));
+      lines.push(`🛡️ Redukcja: − Obrona magii (${target.magicDefense}) → ${incoming}`);
+    } else {
+      incoming = Math.max(0, incoming - Number(target.armor ?? 0));
+      lines.push(`🛡️ Redukcja: − Pancerz (${target.armor}) → ${incoming}`);
+    }
+
+    // tarcza maga (jeżeli cel ma)
+    if ((target.mageShield || 0) > 0) {
+      const use = Math.min(target.mageShield, incoming);
+      const reflected = use;
+      incoming = Math.max(0, incoming - use);
+
+      setSets((prev) => {
+        const next = [...prev];
+        const t = { ...next[targetIndex] };
+        t.mageShield = Math.max(0, (t.mageShield || 0) - use);
+        next[targetIndex] = t;
+        return next;
+      });
+
+      lines.push(`🔮 Tarcza Maga: −${use} obrażeń, odbija ${use} we wroga.`);
+      if (reflected > 0) damageEnemy(enemy.id, reflected);
+    }
+
+    // zadaj obrażenia celowi
+    if (incoming > 0) {
+      setSets((prev) => {
+        const next = [...prev];
+        const cur = { ...next[targetIndex] };
+        const before = cur.hp ?? 0;
+        cur.hp = Math.max(0, before - incoming);
+
+        // Faeykai: maska pęka przy <21% max HP
+        if (cur.race === "Faeykai") {
+          const thresh = Math.ceil((cur.maxHp || 20) * 0.21);
+          if (cur.hp < thresh) cur.faeykaiMaskBroken = true;
+        }
+
+        // Krasnolud: jeśli uzbrojony i spadnie do 0 → hibernacja 2 tury
+        if (cur.race === "Krasnolud" && cur.dwarfPassiveArmed && before > 0 && cur.hp <= 0) {
+          cur.dwarfHibernating = true;
+          cur.dwarfHibernateTurns = 2;
+          lines.push(`🛡️ Krasnolud: wchodzi w hibernację na 2 tury (niewrażliwy).`);
+        }
+
+        next[targetIndex] = cur;
+        return next;
+      });
+      lines.push(`❤️ HP Postaci ${targetIndex + 1} −${incoming}`);
+    }
+
+    // skonsumuj jednorazowe wymuszenie celu (wróg→gracz)
+    if (order && order.kind === "player") setForcedOrders((prev) => ({ ...prev, [enemy.id]: null }));
 
     addLog(lines.join("\n"));
   };
@@ -733,9 +804,10 @@ export default function BattleSimulator() {
       const next = [...prev];
       const t = { ...next[targetIndex] };
       t.hp = healValue;
-      // jeśli był krasnolud w hibernacji — zakończ hibernację
+      // jeśli był krasnolud w hibernacji — zakończ hibernację i odblokuj ponowne uzbrojenie
       t.dwarfHibernating = false;
       t.dwarfHibernateTurns = 0;
+      t.dwarfPassiveArmed = false;
       next[targetIndex] = t;
       return next;
     });
@@ -812,9 +884,9 @@ export default function BattleSimulator() {
           }
         }
 
-        // Faeykai: maska pęknięta, jeśli HP < 10%
+        // Faeykai: maska pęknięta, jeśli HP < 21%
         if (me.race === "Faeykai") {
-          const thresh = Math.ceil((me.maxHp || 20) * 0.1);
+          const thresh = Math.ceil((me.maxHp || 20) * 0.21);
           if ((me.hp || 0) < thresh) me.faeykaiMaskBroken = true;
         }
 
@@ -1018,7 +1090,7 @@ export default function BattleSimulator() {
                         🕯️ Rzuć przekleństwo
                       </button>
                     </div>
-                    <small>Jeśli Faeykai ma &lt; 10% max HP i jest poza ojczyzną, zaklęcia mają −5 do trafienia do czasu odpoczynku/maski.</small>
+                    <small>Jeśli Faeykai ma &lt; 21% max HP i jest poza ojczyzną, zaklęcia mają −5 do trafienia do czasu odpoczynku/maski.</small>
                   </div>
                 )}
               </div>
@@ -1026,20 +1098,36 @@ export default function BattleSimulator() {
               {/* KLASOWE */}
               <div style={{ marginTop: 8, borderTop: "1px dashed #ccc", paddingTop: 8 }}>
                 <strong>Umiejętność klasowa (1×/odp):</strong>
+
                 {set.clazz === "Dyplomata" && (
-                  <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-                    <label>Wróg:
-                      <select value={diploEnemy} onChange={(e)=>setDiploEnemy(e.target.value)}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginTop: 6 }}>
+                    <label>Wróg źródłowy:
+                      <select value={diplomacySourceEnemy} onChange={(e)=>setDiplomacySourceEnemy(e.target.value)}>
                         {ENEMIES.map((e)=><option key={e.id} value={e.id}>{e.name}</option>)}
                       </select>
                     </label>
-                    <label>Cel (postać):
-                      <select value={diploTarget} onChange={(e)=>setDiploTarget(Number(e.target.value))}>
-                        {sets.map((_, idx)=><option key={idx} value={idx}>Postać {idx+1}</option>)}
+                    <label>Rodzaj celu:
+                      <select value={diplomacyTargetType} onChange={(e)=>setDiplomacyTargetType(e.target.value)}>
+                        <option value="player">Gracz</option>
+                        <option value="enemy">Wróg</option>
                       </select>
                     </label>
+                    {diplomacyTargetType === "player" ? (
+                      <label>Cel (postać):
+                        <select value={diplomacyTargetPlayer} onChange={(e)=>setDiplomacyTargetPlayer(Number(e.target.value))}>
+                          {sets.map((_, idx)=><option key={idx} value={idx}>Postać {idx+1}</option>)}
+                        </select>
+                      </label>
+                    ) : (
+                      <label>Cel (wróg):
+                        <select value={diplomacyTargetEnemy} onChange={(e)=>setDiplomacyTargetEnemy(e.target.value)}>
+                          {ENEMIES.map((e)=><option key={e.id} value={e.id}>{e.name}</option>)}
+                        </select>
+                      </label>
+                    )}
                   </div>
                 )}
+
                 <div style={{ marginTop: 6 }}>
                   <button onClick={() => useClassPower(i)} disabled={set.classUsed} title="1 akcja">
                     {set.classUsed ? "Użyto" : `Użyj (${set.clazz})`}
@@ -1081,7 +1169,7 @@ export default function BattleSimulator() {
                     🛡️ Podnieś
                   </button>
                 </div>
-                <small>Przywraca 25% Max HP. Jeśli krasnolud był w hibernacji — kończy hibernację.</small>
+                <small>Przywraca 25% Max HP. Jeśli krasnolud był w hibernacji — kończy hibernację i pozwala ponownie „Uzbroić hibernację”.</small>
               </div>
 
               <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
@@ -1163,9 +1251,14 @@ export default function BattleSimulator() {
         {/* PRAWA KOLUMNA — ATAK WROGA */}
         <div>
           <h3>4) Atak wroga</h3>
-          <button onClick={enemyAttack}>👹 Wróg atakuje (cel: aktywna lub wymuszony)</button>
+          <button onClick={enemyAttack}>👹 Wróg atakuje (cel: aktywna / wymuszony / wróg)</button>
           <div style={{ marginTop: 8 }}>
-            <div>Wymuszenie celu (Dyplomata): {Object.entries(forcedTarget).some(([,v])=>v!==null) ? "aktywne" : "brak"}</div>
+            <div>
+              Wymuszenia Dyplomaty:&nbsp;
+              {Object.entries(forcedOrders).some(([,v])=>v!==null)
+                ? Object.entries(forcedOrders).map(([id,ord])=> ord ? `${ENEMIES.find(e=>e.id===id)?.name}: ${ord.kind==="player" ? `→ Postać ${ord.target+1}` : `→ ${ENEMIES.find(e=>e.id===ord.target)?.name||ord.target}`}` : null).filter(Boolean).join(" | ")
+                : "brak"}
+            </div>
           </div>
         </div>
       </div>
@@ -1177,4 +1270,3 @@ export default function BattleSimulator() {
     </div>
   );
 }
-
