@@ -1,166 +1,206 @@
 import React, { useState } from "react";
 
 /* ===== Pomocnicze ===== */
-const d = (s) => Math.floor(Math.random() * s) + 1;
-const statMod = (v) => {
-  if (v == null) return 0;
-  if (v <= 1) return 0;
-  if (v <= 4) return 1;
-  if (v <= 7) return 2;
-  if (v <= 10) return 3;
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+const d = (sides) => Math.floor(Math.random() * sides) + 1;
+
+function statMod(value) {
+  if (value <= 1) return 0;
+  if (value <= 4) return 1;
+  if (value <= 7) return 2;
+  if (value <= 10) return 3;
   return 4;
-};
+}
 
-/* ===== Broń ===== */
+/* ===== Dane broni / wrogów / zaklęć ===== */
 const weaponData = {
-  sword: { name: "Miecz krótki", stat: "STR", dmgDie: 6 },
-  bow:   { name: "Łuk",          stat: "PER", dmgDie: 6 },
-  staff: { name: "Kij magiczny", stat: "MAG", dmgDie: 4 },
-  // jeśli zapragniesz muszkietu dla Strzelca:
-  // musket: { name: "Muszkiet", stat: "PER", dmgDie: 8 },
+  sword:  { name: "Miecz krótki", stat: "STR", dmgDie: 6, type: "physical" },
+  bow:    { name: "Łuk",          stat: "PER", dmgDie: 6, type: "physical" },
+  musket: { name: "Muszkiet",     stat: "PER", dmgDie: 6, type: "physical" },
+  staff:  { name: "Kij magiczny", stat: "MAG", dmgDie: 4, type: "physical" }, // trafienie traktujemy jak fizyczne
 };
 
-/* ===== Typy wrogów (baza) ===== */
-const enemyTypes = {
-  "Elfi Kultysta": {
-    hp: 45, maxHp: 45, essence: 20, maxEssence: 20,
-    armor: 4, magicDefense: 4, toHit: 8, defense: 10,
-    spells: ["Mroczny Pakt", "Wyssanie życia", "Magiczny pocisk"]
-  },
-  "Szpieg Magmaratora": {
-    hp: 30, maxHp: 30, essence: 20, maxEssence: 20,
-    armor: 2, magicDefense: 2, toHit: 10, defense: 8,
-    spells: ["Magiczny pocisk", "Wybuch energii"]
-  }
+const ENEMIES = [
+  { id: "cultist", name: "Kultysta", defense: 12, armor: 1, magicDefense: 2, toHit: 14, dmgDie: 4, dmgType: "magiczny", hp: 13 },
+  { id: "warrior", name: "Wojownik", defense: 17, armor: 3, magicDefense: 1, toHit: 12, dmgDie: 6, dmgType: "fizyczny",  hp: 15 },
+];
+
+const SPELLS = {
+  "Magiczny pocisk": { key: "missile", cost: 3, dmgDie: 6, needsToHit: true,  type: "damage" },
+  "Wybuch energii":  { key: "burst",   cost: 5, dmgDie: 4, needsToHit: true,  type: "damage" },
+  "Zasklepienie ran":{ key: "heal",    cost: 5, healDie: 6, needsToHit: false, type: "heal" },
+  "Oślepienie":      { key: "blind",   cost: 8, needsToHit: false, type: "effect" },
 };
 
-const makeChar = () => ({
-  name: "",
-  race: "Człowiek",
-  clazz: "Wojownik",
-
-  STR: null, DEX: null, PER: null, MAG: null, CHA: null,
-  armor: 0, magicDefense: 0,
-
-  hp: 20, maxHp: 20,
-  essence: 20, maxEssence: 20,
-
-  actionsLeft: 2,
-
-  // Rasowe: Człowiek
-  humanCharges: [false, false, false, false, false],
-  humanBuff: null,
-  humanPendingChoice: "dmg",
-
-  // Rasowe: Elf
-  elfChargeUsed: false,
-  elfChargedTurn: null,
-
-  // Rasowe: Krasnolud
-  dwarfPassiveArmed: false,
-  dwarfHibernating: false,
-  dwarfHibernateTurns: 0,
-
-  // Rasowe: Faeykai
-  faeykaiChargesLeft: 3,      // błogosławieństwo/przekleństwo (3/odpoczynek)
-  faeykaiMaskBroken: false,   // czy maska pękła
-  faeykaiOutsideHomeland: true,
-  effects: [],
-
-  // Klasowe
-  classUsed: false,
-  warriorReady: false,
-  archerReady: false,
-  shooterReady: false,
-  mageReady: false,
-  mageShield: 0,
-});
+const RACES = ["Człowiek", "Elf", "Krasnolud", "Faeykai"];
+const CLASSES = ["Wojownik", "Łucznik", "Strzelec", "Mag", "Dyplomata"];
 
 /* ===== Komponent ===== */
 export default function BattleSimulator() {
-  /* ---------- Stan: cztery postacie ---------- */
+  /* --- Stan postaci (4 sloty) --- */
+  const makeChar = () => ({
+    name: "",
+    race: "Człowiek",
+    clazz: "Wojownik",
+
+    STR: null, DEX: null, PER: null, MAG: null, CHA: null,
+    armor: 0, magicDefense: 0,
+
+    hp: 20, maxHp: 20,
+    essence: 20, maxEssence: 20,
+
+    actionsLeft: 2, // 2 akcje na turę
+
+    // RASOWE
+    humanCharges: [false, false, false, false, false],
+    humanBuff: null, // { type: 'dmg'|'tohit', expiresTurn }
+    humanPendingChoice: "dmg",
+
+    elfChargeUsed: false,
+    elfChargedTurn: null,
+
+    dwarfPassiveArmed: false,
+    dwarfHibernating: false,
+    dwarfHibernateTurns: 0,
+
+    faeykaiChargesLeft: 3,
+    faeykaiMaskBroken: false,
+    faeykaiOutsideHomeland: true,
+    effects: [], // np. [{type:"bless", value:3, turnsLeft:3}]
+
+    // KLASOWE — 1×/odp i „ready” (=zadziała przy nast. akcji)
+    classUsed: false,
+    warriorReady: false,
+    archerReady: false,
+    shooterReady: false,
+    mageReady: false,
+    mageShield: 0, // tarcza po czarze (wartość)
+  });
+
   const [sets, setSets] = useState([makeChar(), makeChar(), makeChar(), makeChar()]);
   const [lockedSets, setLockedSets] = useState([false, false, false, false]);
   const [activeSet, setActiveSet] = useState(0);
 
-  /* ---------- Tura, log ---------- */
+  /* --- Test walki / log / tury --- */
+  const [weapon, setWeapon] = useState("sword");
+  const [defense, setDefense] = useState(0);
+  const [enemyArmor, setEnemyArmor] = useState(0);
+  const [enemyMagicDefense, setEnemyMagicDefense] = useState(0);
+  const [selectedSpellName, setSelectedSpellName] = useState("Magiczny pocisk");
+  const [healTarget, setHealTarget] = useState(0);
+
+  // Dyplomata: wybór wroga i celu przy aktywacji
+  const [diploEnemy, setDiploEnemy] = useState("cultist");
+  const [diploTarget, setDiploTarget] = useState(0);
+
+  const [chosenEnemyId, setChosenEnemyId] = useState("cultist");
+  const [enemyStates, setEnemyStates] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: e.hp }), {}));
+
+  // Efekty na wrogach
+  const [enemyStun, setEnemyStun] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: 0 }), {}));
+  const [enemyCurse, setEnemyCurse] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: 0 }), {})); // +3 do progu trafienia
+  const [enemyDefenseDebuff, setEnemyDefenseDebuff] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: { value: 0, turns: 0 } }), {})); // -5, 3 tury
+  const [enemyArmorDebuff, setEnemyArmorDebuff] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: { factor: 1, turns: 0 } }), {})); // x0.5, 3 tury
+
+  // Dyplomata: wymuszenie celu (jednorazowe)
+  const [forcedTarget, setForcedTarget] = useState(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: null }), {})); // { enemyId: playerIndex | null }
+
+  // Revive dropdown per postać
+  const [reviveTargetIndex, setReviveTargetIndex] = useState([null, null, null, null]);
+
   const [turn, setTurn] = useState(1);
+
   const [log, setLog] = useState([]);
   const addLog = (line) => {
-    const stamp = new Date().toLocaleTimeString();
-    setLog((prev) => [`[${stamp}] ${line}`, ...prev]);
+    const t = new Date().toLocaleTimeString();
+    setLog((prev) => [`[${t}] ${line}`, ...prev]);
   };
 
-  /* ---------- Wrogowie ---------- */
-  const [roster, setRoster] = useState({ "Elfi Kultysta": 1, "Szpieg Magmaratora": 0 });
-  const [enemies, setEnemies] = useState([]);           // instancje
-  const [selectedEnemyId, setSelectedEnemyId] = useState(null);
-  const [enemyWeaponChoice, setEnemyWeaponChoice] = useState("sword");
-  const [enemyTargetPlayer, setEnemyTargetPlayer] = useState(0);
+  /* ====== Pomocnicze mutatory ====== */
+  const updateSetField = (i, key, val) => {
+    setSets((prev) => {
+      const next = [...prev];
+      const parsed = ["name","race","clazz","humanPendingChoice"].includes(key)
+        ? val
+        : (val === "" ? null : Number(val));
+      next[i] = { ...next[i], [key]: parsed };
+      if (key === "hp" && next[i].race === "Faeykai") {
+        const s = next[i];
+        const thresh = Math.ceil((s.maxHp || 20) * 0.1);
+        if ((s.hp || 0) < thresh) next[i].faeykaiMaskBroken = true;
+      }
+      return next;
+    });
+  };
 
-  /* ---------- Dyplomata (wymuszenie) ---------- */
-  const [forcedOrders, setForcedOrders] = useState({}); // { instId: { kind:'player'|'enemy', target:<idx|id> } }
+  const getEnemyBase = (id) => ENEMIES.find((e) => e.id === id) || ENEMIES[0];
 
-  /* ---------- Helpers ---------- */
-  const getActiveChar = () => sets[activeSet] || makeChar();
+  const effectiveEnemyDefense = (id) => {
+    const base = getEnemyBase(id).defense;
+    const deb = enemyDefenseDebuff[id];
+    return Math.max(0, base - (deb?.value || 0));
+  };
+
+  const effectiveEnemyArmor = (id) => {
+    const base = getEnemyBase(id).armor;
+    const deb = enemyArmorDebuff[id];
+    const factor = deb?.factor || 1;
+    return Math.max(0, Math.floor(base * factor));
+  };
+
+  const getActiveStats = () => sets[activeSet];
 
   const lockSet = (i) => {
     const s = sets[i];
-    const statsOk = ["STR","DEX","PER","MAG","CHA"].every(k => s[k] != null && s[k] !== "");
-    if (!statsOk) return addLog(`❌ Postać ${i+1}: uzupełnij wszystkie statystyki.`);
-    setLockedSets(prev => { const n=[...prev]; n[i]=true; return n; });
-    addLog(`✔️ Postać ${i+1} (${s.name||`Postać ${i+1}`}) została zatwierdzona.`);
-  };
-
-  const spendPlayerAction = (i) => {
-    let ok = false;
-    setSets(prev => {
-      const n=[...prev]; const c={...n[i]};
-      if ((c.actionsLeft||0)>0){ c.actionsLeft -= 1; ok = true; }
-      n[i]=c; return n;
+    const required = ["STR", "DEX", "PER", "MAG", "CHA"].every((k) => s[k] !== null && s[k] !== "");
+    if (!required) {
+      addLog(`❌ Postać ${i + 1}: uzupełnij wszystkie podstawowe statystyki.`);
+      return;
+    }
+    setLockedSets((prev) => {
+      const next = [...prev];
+      next[i] = true;
+      return next;
     });
-    return ok;
+    addLog(`✔️ Postać ${i + 1} (${s.name || `Postać ${i + 1}`}) zatwierdzona.`);
   };
 
-  const damageEnemyInstance = (id, amount) => {
-    if (amount<=0) return;
-    setEnemies(prev => prev.map(e => e.id===id ? { ...e, hp: Math.max(0, e.hp - amount) } : e));
-  };
-
-  const effectiveEnemyDefense = (e) => {
-    const deb = e.defDown?.turnsLeft > 0 ? (e.defDown.amount || 0) : 0;
-    return Math.max(0, (e.defense||0) - deb);
-  };
-
-  const effectiveEnemyArmor = (e) => {
-    const halved = (e.armorHalvedTurns || 0) > 0;
-    const base = Number(e.armor||0);
-    return halved ? Math.max(0, Math.floor(base * 0.5)) : base;
+  const resetAllEnemyEffects = () => {
+    // globalny reset efektów na wrogach (zgodnie z prośbą o czyszczenie efektów przy odpoczynku)
+    setEnemyStun(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: 0 }), {}));
+    setEnemyCurse(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: 0 }), {}));
+    setEnemyDefenseDebuff(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: { value: 0, turns: 0 } }), {}));
+    setEnemyArmorDebuff(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: { factor: 1, turns: 0 } }), {}));
+    setForcedTarget(ENEMIES.reduce((a, e) => ({ ...a, [e.id]: null }), {}));
+    addLog("🧹 Zresetowano efekty na wrogach (ogłuszenia, przekleństwa, debuffy, wymuszenia celu).");
   };
 
   const restSet = (i) => {
     setSets((prev) => {
-      const n = [...prev];
-      const c = { ...n[i] };
+      const next = [...prev];
+      const c = { ...next[i] };
 
-      c.hp = c.maxHp;
-      c.essence = c.maxEssence;
+      // pełne odnowienie
+      c.hp = c.maxHp ?? 20;
+      c.essence = c.maxEssence ?? 20;
       c.actionsLeft = 2;
 
-      // reset rasowych
+      // reset rasowych i klasowych
       c.humanCharges = [false, false, false, false, false];
       c.humanBuff = null;
+
       c.elfChargeUsed = false;
       c.elfChargedTurn = null;
+
       c.dwarfPassiveArmed = false;
       c.dwarfHibernating = false;
       c.dwarfHibernateTurns = 0;
+
       c.faeykaiChargesLeft = 3;
-      c.faeykaiPending = null;
-      c.faeykaiMaskBroken = false;   // maska wraca
+      c.faeykaiMaskBroken = false;
+
       c.effects = [];
 
-      // reset klasowych
       c.classUsed = false;
       c.warriorReady = false;
       c.archerReady = false;
@@ -168,731 +208,655 @@ export default function BattleSimulator() {
       c.mageReady = false;
       c.mageShield = 0;
 
-      n[i] = c;
-      return n;
+      next[i] = c;
+      return next;
     });
-    addLog(`💤 Postać ${i + 1} odpoczęła i odnowiła zasoby (w tym maskę Faeykai oraz ładunki rasowe).`);
+
+    // Global: reset efektów na wrogach
+    resetAllEnemyEffects();
+
+    addLog(`💤 Postać ${i + 1} odpoczęła: HP/Esencja odnowione, efekty i liczniki zresetowane.`);
   };
 
-  const createEnemies = () => {
-    const list = [];
-    Object.entries(roster).forEach(([typeName, count]) => {
-      for (let i=1;i<=Number(count||0);i++){
-        const base = enemyTypes[typeName];
-        list.push({
-          id: `${typeName} #${i}`,
-          type: typeName,
-          name: `${typeName} #${i}`,
-          hp: base.hp, maxHp: base.maxHp,
-          essence: base.essence, maxEssence: base.maxEssence,
-          armor: base.armor, magicDefense: base.magicDefense,
-          toHit: base.toHit, defense: base.defense,
-          spells: base.spells,
-          actionsLeft: 2,
-          bless: null,       // { value, turnsLeft }
-          cursed: 0,         // tury kary do trafienia (+3 do progu)
-          defDown: null,     // { amount:5, turnsLeft:3 }
-          armorHalvedTurns: 0,
-          tempToHitBuff: 0,  // z Mrocznego Paktu (+4 1 tura)
+  const applyEnemy = () => {
+    const e = getEnemyBase(chosenEnemyId);
+    if (!e) return;
+    setDefense(e.defense);
+    setEnemyArmor(e.armor);
+    setEnemyMagicDefense(e.magicDefense);
+    addLog(`🎯 Wybrano wroga: ${e.name}`);
+  };
+
+  const setActiveEssence = (newVal) => {
+    setSets((prev) => {
+      const next = [...prev];
+      const maxE = next[activeSet].maxEssence ?? 20;
+      next[activeSet] = { ...next[activeSet], essence: clamp(newVal, 0, maxE) };
+      return next;
+    });
+  };
+
+  const spendAction = (i) => {
+    let ok = false;
+    setSets((prev) => {
+      const next = [...prev];
+      const c = { ...next[i] };
+      if ((c.actionsLeft || 0) > 0) {
+        c.actionsLeft -= 1;
+        ok = true;
+      }
+      next[i] = c;
+      return next;
+    });
+    return ok;
+  };
+
+  const damageEnemy = (enemyId, dmg) => {
+    if (dmg <= 0) return;
+    setEnemyStates((prev) => {
+      const next = { ...prev };
+      next[enemyId] = Math.max(0, (next[enemyId] ?? 0) - dmg);
+      return next;
+    });
+    addLog(`💔 Wróg (${enemyId}) otrzymał ${dmg} obrażeń (pozostało ${Math.max(0, (enemyStates[enemyId] ?? 0) - dmg)} HP).`);
+  };
+
+  /* ===== RASOWE ===== */
+  const useHumanCharge = (i, idx) => {
+    const c = sets[i];
+    if (c.race !== "Człowiek") return;
+    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji.");
+    if (c.humanCharges[idx]) return; // już użyty
+
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      const charges = [...me.humanCharges];
+      charges[idx] = true;
+      me.humanCharges = charges;
+
+      const buffType = me.humanPendingChoice; // 'dmg' | 'tohit' | 'hp'
+      if (buffType === "hp") {
+        me.hp = Math.min(me.maxHp ?? 20, (me.hp ?? 0) + 2);
+        addLog(`🧬 Człowiek (Postać ${i + 1}): natychmiastowe +2 HP.`);
+      } else {
+        me.humanBuff = { type: buffType, expiresTurn: turn }; // wygasa przy Next Turn
+        addLog(`🧬 Człowiek (Postać ${i + 1}): buff ${buffType === "dmg" ? "+2 obrażenia" : "+2 do trafienia"} do końca tury.`);
+      }
+      me.actionsLeft = (me.actionsLeft || 0) - 1;
+      next[i] = me;
+      return next;
+    });
+  };
+
+  const useElfCharge = (i) => {
+    const c = sets[i];
+    if (c.race !== "Elf") return;
+    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji.");
+    if (c.elfChargeUsed) return;
+
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      me.elfChargeUsed = true;
+      me.elfChargedTurn = turn;
+      me.actionsLeft = (me.actionsLeft || 0) - 1;
+      next[i] = me;
+      return next;
+    });
+    addLog(`🌪️ Elf (Postać ${i + 1}) kumuluje energię — eksplozja nastąpi na początku kolejnej tury.`);
+  };
+
+  const armDwarfHibernate = (i) => {
+    const c = sets[i];
+    if (c.race !== "Krasnolud") return;
+    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji.");
+    if (c.dwarfPassiveArmed) return;
+
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      me.dwarfPassiveArmed = true;
+      me.actionsLeft = (me.actionsLeft || 0) - 1;
+      next[i] = me;
+      return next;
+    });
+    addLog(`⛏️ Krasnolud (Postać ${i + 1}): hibernacja uzbrojona (zadziała przy spadku do 0 HP).`);
+  };
+
+  const useFaeykaiBless = (i, targetIndex) => {
+    const c = sets[i];
+    if (c.race !== "Faeykai") return;
+    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji.");
+    if ((c.faeykaiChargesLeft || 0) <= 0) return addLog("❌ Brak ładunków Faeykai.");
+
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      const target = { ...next[targetIndex] };
+
+      target.effects = [...(target.effects || []), { type: "bless", value: 3, turnsLeft: 3 }];
+      me.faeykaiChargesLeft = (me.faeykaiChargesLeft || 0) - 1;
+      me.actionsLeft = (me.actionsLeft || 0) - 1;
+
+      next[i] = me;
+      next[targetIndex] = target;
+      return next;
+    });
+    addLog(`🌿 Faeykai (Postać ${i + 1}): błogosławieństwo dla Postaci ${targetIndex + 1} (+3 HP/ turę przez 3 tury).`);
+  };
+
+  const useFaeykaiCurse = (i, enemyId) => {
+    const c = sets[i];
+    if (c.race !== "Faeykai") return;
+    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji.");
+    if ((c.faeykaiChargesLeft || 0) <= 0) return addLog("❌ Brak ładunków Faeykai.");
+
+    setEnemyCurse((prev) => {
+      const next = { ...prev };
+      next[enemyId] = Math.max(next[enemyId], 3); // 3 tury kary
+      return next;
+    });
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      me.faeykaiChargesLeft = (me.faeykaiChargesLeft || 0) - 1;
+      me.actionsLeft = (me.actionsLeft || 0) - 1;
+      next[i] = me;
+      return next;
+    });
+    addLog(`🕯️ Faeykai (Postać ${i + 1}): przekleństwo na wroga ${enemyId} (−3 do trafienia przez 3 tury).`);
+  };
+
+  /* ===== KLASOWE: aktywacje ===== */
+  const useClassPower = (i) => {
+    const c = sets[i];
+    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji.");
+    if (c.classUsed) return addLog("❌ Umiejętność klasowa już użyta w tym odpoczynku.");
+
+    if (c.clazz === "Wojownik") {
+      setSets((prev) => {
+        const next = [...prev];
+        const me = { ...next[i] };
+        me.classUsed = true;
+        me.warriorReady = true; // następny atak fizyczny: auto-hit + pełne obrażenia bez obrony/pancerza
+        me.actionsLeft = (me.actionsLeft || 0) - 1;
+        next[i] = me;
+        return next;
+      });
+      addLog(`🎖️ Wojownik (Postać ${i + 1}): przygotował „maksymalny cios” na następny atak fizyczny.`);
+      return;
+    }
+
+    if (c.clazz === "Łucznik") {
+      setSets((prev) => {
+        const next = [...prev];
+        const me = { ...next[i] };
+        me.classUsed = true;
+        me.archerReady = true; // następny atak łukiem nakłada debuff obrony
+        me.actionsLeft = (me.actionsLeft || 0) - 1;
+        next[i] = me;
+        return next;
+      });
+      addLog(`🏹 Łucznik (Postać ${i + 1}): przygotował „celny strzał” — po następnym trafieniu łukiem obniży Obr. celu o 5 (3 tury).`);
+      return;
+    }
+
+    if (c.clazz === "Strzelec") {
+      setSets((prev) => {
+        const next = [...prev];
+        const me = { ...next[i] };
+        me.classUsed = true;
+        me.shooterReady = true; // następny atak muszkietem nakłada 50% pancerza
+        me.actionsLeft = (me.actionsLeft || 0) - 1;
+        next[i] = me;
+        return next;
+      });
+      addLog(`🔫 Strzelec (Postać ${i + 1}): przygotował „druzgocący strzał” — po następnym trafieniu muszkietem pancerz celu spada o 50% (3 tury).`);
+      return;
+    }
+
+    if (c.clazz === "Mag") {
+      setSets((prev) => {
+        const next = [...prev];
+        const me = { ...next[i] };
+        me.classUsed = true;
+        me.mageReady = true; // po następnym czarze damage → tarcza 50%
+        me.actionsLeft = (me.actionsLeft || 0) - 1;
+        next[i] = me;
+        return next;
+      });
+      addLog(`🔮 Mag (Postać ${i + 1}): przygotował „tarczę” — po następnym czarze z obrażeniami utworzy się tarcza = 50% zadanych obrażeń.`);
+      return;
+    }
+
+    if (c.clazz === "Dyplomata") {
+      // wymagamy wyboru wroga i celu (postać)
+      const enemyId = diploEnemy;
+      const targetIdx = diploTarget;
+      setForcedTarget((prev) => ({ ...prev, [enemyId]: targetIdx }));
+      setSets((prev) => {
+        const next = [...prev];
+        const me = { ...next[i] };
+        me.classUsed = true;
+        me.actionsLeft = (me.actionsLeft || 0) - 1;
+        next[i] = me;
+        return next;
+      });
+      addLog(`🗣️ Dyplomata (Postać ${i + 1}) zmusza wroga ${enemyId} do zaatakowania Postaci ${targetIdx + 1} przy jego następnym ataku.`);
+      return;
+    }
+  };
+
+  /* ===== WALKA: Atak fizyczny ===== */
+  const doAttack = () => {
+    if (!lockedSets[activeSet]) return addLog("❌ Najpierw zatwierdź wybraną postać.");
+    const c = getActiveStats();
+    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji w tej turze.");
+
+    const w = weaponData[weapon];
+    const statVal = Number(c[w.stat] ?? 0);
+
+    const humanToHitBonus = c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? 2 : 0;
+
+    // Wojownik: jeżeli gotowy i atak fizyczny → auto-hit + max dmg bez obrony/pancerza
+    if (c.clazz === "Wojownik" && c.warriorReady && w.type === "physical") {
+      const maxDmg = w.dmgDie; // „pełne obrażenia” = maksymalna wartość kości
+      addLog(`💥 Wojownik (maksymalny cios): auto-trafienie, brak obrony/pancerza. Obrażenia = k${w.dmgDie} max (${maxDmg}).`);
+      spendAction(activeSet);
+      setSets((prev) => {
+        const next = [...prev];
+        next[activeSet] = { ...next[activeSet], warriorReady: false };
+        return next;
+      });
+      damageEnemy(chosenEnemyId, maxDmg);
+      return;
+    }
+
+    const effDefense = effectiveEnemyDefense(chosenEnemyId);
+    const roll20 = d(20);
+    const toHit = roll20 + statVal + humanToHitBonus;
+    const hit = toHit >= effDefense;
+
+    addLog(
+      `⚔️ Atak (${w.name}) — k20=${roll20} + ${w.stat}(${statVal})` +
+      (humanToHitBonus ? ` + human(+2)` : "") +
+      ` = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅ TRAFIENIE" : "❌ PUDŁO"}`
+    );
+
+    spendAction(activeSet);
+    if (!hit) return;
+
+    // obrażenia
+    const rawDie = d(w.dmgDie);
+    const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
+    const raw = rawDie + humanDmgBonus;
+    const effArmor = effectiveEnemyArmor(chosenEnemyId);
+    const afterArmor = Math.max(0, raw - effArmor);
+
+    addLog(
+      `🗡️ Obrażenia: k${w.dmgDie}=${rawDie}` +
+      (humanDmgBonus ? ` + human(+2)` : "") +
+      ` = ${raw} − Pancerz(${effArmor}) = ${afterArmor}`
+    );
+
+    // Łucznik: jeżeli „ready” i to był łuk → debuff obrony
+    if (c.clazz === "Łucznik" && c.archerReady && weapon === "bow") {
+      setEnemyDefenseDebuff((prev) => {
+        const next = { ...prev };
+        next[chosenEnemyId] = { value: 5, turns: 3 };
+        return next;
+      });
+      setSets((prev) => {
+        const next = [...prev];
+        next[activeSet] = { ...next[activeSet], archerReady: false };
+        return next;
+      });
+      addLog(`🏹 Debuff: Obrona celu −5 na 3 tury.`);
+    }
+
+    // Strzelec: jeżeli „ready” i to był muszkiet → debuff pancerza x0.5
+    if (c.clazz === "Strzelec" && c.shooterReady && weapon === "musket") {
+      setEnemyArmorDebuff((prev) => {
+        const next = { ...prev };
+        next[chosenEnemyId] = { factor: 0.5, turns: 3 };
+        return next;
+      });
+      setSets((prev) => {
+        const next = [...prev];
+        next[activeSet] = { ...next[activeSet], shooterReady: false };
+        return next;
+      });
+      addLog(`🔧 Debuff: Pancerz celu ×0.5 na 3 tury.`);
+    }
+
+    damageEnemy(chosenEnemyId, afterArmor);
+  };
+
+  /* ===== ZAKLĘCIA ===== */
+  const castSelectedSpell = () => {
+    if (!lockedSets[activeSet]) return addLog("❌ Najpierw zatwierdź wybraną postać.");
+    const c = getActiveStats();
+    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji w tej turze.");
+
+    const spell = SPELLS[selectedSpellName];
+    if (!spell) return;
+    if (c.essence < spell.cost) return addLog(`❌ Esencja: ${c.essence} < koszt ${spell.cost}.`);
+
+    const MAG = Number(c.MAG ?? 0);
+    const faeykaiPenalty = c.race === "Faeykai" && c.faeykaiOutsideHomeland && c.faeykaiMaskBroken ? 5 : 0;
+
+    let lines = [`✨ „${selectedSpellName}” — koszt ${spell.cost} (Esencja przed: ${c.essence})`];
+    setActiveEssence(c.essence - spell.cost);
+    spendAction(activeSet);
+
+    if (spell.type === "damage") {
+      const roll20 = d(20);
+      const effDefense = effectiveEnemyDefense(chosenEnemyId);
+      const toHit = roll20 + MAG - faeykaiPenalty + (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? 2 : 0);
+      const hit = toHit >= effDefense;
+      lines.push(
+        `🎯 Trafienie: k20=${roll20} + MAG(${MAG})` +
+        (faeykaiPenalty ? ` − Faeykai(−5)` : "") +
+        (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? ` + human(+2)` : "") +
+        ` = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`
+      );
+      if (!hit) return addLog(lines.join("\n"));
+
+      const rollDmg = d(spell.dmgDie);
+      const mod = statMod(MAG);
+      const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
+      const raw = rollDmg + mod + humanDmgBonus;
+      const reduced = Math.max(0, raw - Number(enemyMagicDefense));
+      lines.push(
+        `💥 Obrażenia: k${spell.dmgDie}=${rollDmg} + mod(MAG)=${mod}` +
+        (humanDmgBonus ? ` + human(+2)` : "") +
+        ` = ${raw}`
+      );
+      lines.push(`🛡️ Redukcja magią: −${enemyMagicDefense} → ${reduced}`);
+      addLog(lines.join("\n"));
+
+      // Mag: tarcza po czarze (jeśli mageReady)
+      if (c.clazz === "Mag" && c.mageReady && reduced > 0) {
+        const shield = Math.floor(reduced * 0.5);
+        setSets((prev) => {
+          const next = [...prev];
+          next[activeSet] = { ...next[activeSet], mageReady: false, mageShield: shield };
+          return next;
         });
+        addLog(`🛡️ Tarcza Maga aktywna: ${Math.floor(reduced * 0.5)} (odbije i zablokuje przy następnym ataku wroga).`);
       }
-    });
-    setEnemies(list);
-    setSelectedEnemyId(list[0]?.id || null);
-    addLog(`👥 Dodano do walki wrogów: ${list.length} szt.`);
+
+      damageEnemy(chosenEnemyId, reduced);
+      return;
+    }
+
+    if (spell.type === "heal") {
+      const rollHeal = d(spell.healDie);
+      setSets((prev) => {
+        const next = [...prev];
+        const caster = { ...next[activeSet] };
+        const target = { ...next[healTarget] };
+
+        // caster.essence — już odjęliśmy
+        target.hp = Math.min(target.maxHp ?? 20, (target.hp ?? 0) + rollHeal);
+
+        next[activeSet] = caster;
+        next[healTarget] = target;
+        return next;
+      });
+      lines.push(
+        `💚 Leczenie: k${spell.healDie}=${rollHeal} → ` +
+        `${sets[activeSet].name || `Postać ${activeSet + 1}`} leczy ` +
+        `${sets[healTarget].name || `Postać ${healTarget + 1}`} o +${rollHeal} HP`
+      );
+      addLog(lines.join("\n"));
+      return;
+    }
+
+    addLog(lines.concat("🌑 Efekt zaklęcia zastosowany.").join("\n"));
   };
-  /* ===================== Panel pasywek rasowych ===================== */
-  const RacePassivesPanel = ({ c, i }) => (
-    <div style={{ marginTop: 10, borderTop: "1px dashed #ccc", paddingTop: 8 }}>
-      {/* LUDZIE */}
-      {c.race === "Człowiek" && (
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Ludzka wytrwałość (5×/odp.):</div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            {c.humanCharges.map((used, idx) => {
-              const isPending = c.humanPendingIdx === idx && !used;
-              return (
-                <div
-                  key={idx}
-                  onClick={()=>{
-                    if (used) return;
-                    if (!spendPlayerAction(i)) return addLog("❌ Brak akcji (Ludzie).");
-                    setSets(prev => { const n=[...prev]; n[i] = { ...n[i], humanPendingIdx: idx }; return n; });
-                  }}
-                  title={used ? "Zużyte" : "Kliknij (zużywa 1 akcję)"}
-                  style={{
-                    width: 18, height: 18,
-                    background: used || isPending ? "#c62828" : "#2e7d32",
-                    borderRadius: 3, cursor: used ? "not-allowed" : "pointer",
-                    border: "1px solid #0004"
-                  }}
-                />
-              );
-            })}
-            {c.humanPendingIdx != null && !c.humanCharges[c.humanPendingIdx] && (
-              <>
-                <select
-                  value={c.humanPendingChoice || "dmg"}
-                  onChange={(e)=>setSets(prev=>{
-                    const n=[...prev]; n[i] = { ...n[i], humanPendingChoice: e.target.value }; return n;
-                  })}
-                >
-                  <option value="dmg">+2 obrażeń (do końca tury)</option>
-                  <option value="tohit">+2 do trafienia (do końca tury)</option>
-                  <option value="hp">+2 HP (natychmiast)</option>
-                </select>
-                <button
-                  onClick={()=>{
-                    setSets(prev=>{
-                      const n=[...prev];
-                      const me={...n[i]};
-                      const idx = me.humanPendingIdx;
-                      if (idx==null || me.humanCharges[idx]) return n;
-                      const choice = me.humanPendingChoice || "dmg";
-                      me.humanCharges = me.humanCharges.map((u,k)=> k===idx ? true : u);
-                      me.humanPendingIdx = null;
 
-                      if (choice==="hp") {
-                        me.hp = Math.min(me.maxHp||20, (me.hp||0)+2);
-                        me.humanBuff = null;
-                      } else {
-                        me.humanBuff = { type: choice, expiresTurn: turn }; // wygasa po turze
-                      }
+  /* ===== ATAK WROGA ===== */
+  const enemyAttack = () => {
+    const enemy = getEnemyBase(chosenEnemyId);
+    if (!enemy) return addLog("❌ Nie wybrano wroga.");
 
-                      n[i]=me; return n;
-                    });
-                    addLog(`👤 P${i+1} używa ludzkiej zdolności: ${c.humanPendingChoice==="dmg"?"+2 DMG":c.humanPendingChoice==="tohit"?"+2 TO-HIT":"+2 HP"}.`);
-                  }}
-                >
-                  Zastosuj
-                </button>
-              </>
-            )}
-          </div>
-          <small style={{ opacity: .7 }}>Efekt nie stackuje się; wygasa po tej turze (HP – natychmiast).</small>
-        </div>
-      )}
+    // cel: wymuszenie dyplomaty?
+    const forced = forcedTarget[enemy.id];
+    const targetIndex = typeof forced === "number" ? forced : activeSet;
+    const target = sets[targetIndex];
 
-      {/* ELF */}
-      {c.race === "Elf" && (
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Elfie naładowanie (1×/odp.):</div>
-          <div
-            onClick={()=>{
-              if (c.elfChargeUsed) return;
-              if (!spendPlayerAction(i)) return addLog("❌ Brak akcji (Elf).");
-              setSets(prev=>{
-                const n=[...prev]; const me={...n[i]};
-                me.elfChargeUsed = true; me.elfChargedTurn = turn;
-                n[i]=me; return n;
-              });
-              addLog(`🌩️ P${i+1} (Elf) ładuje eksplozję — wybuch w następnej turze (elf −5 HP; wrogowie −10 HP i ogłuszenie 1 turę).`);
-            }}
-            title={c.elfChargeUsed ? "Zużyte do odpoczynku" : "Kliknij (zużywa 1 akcję)"}
-            style={{
-              width: 18, height: 18,
-              background: c.elfChargeUsed ? "#c62828" : "#2e7d32",
-              borderRadius: 3, cursor: c.elfChargeUsed ? "not-allowed" : "pointer",
-              border: "1px solid #0004"
-            }}
-          />
-        </div>
-      )}
+    // ogłuszenie?
+    if ((enemyStun[enemy.id] || 0) > 0) {
+      addLog(`🌀 ${enemy.name} jest ogłuszony (pozostało ${enemyStun[enemy.id]} tur).`);
+      return;
+    }
 
-      {/* KRASNOLUD */}
-      {c.race === "Krasnolud" && (
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Krasnoludzka hibernacja:</div>
-          <button
-            onClick={()=>{
-              if (c.dwarfPassiveArmed) return;
-              if (!spendPlayerAction(i)) return addLog("❌ Brak akcji (Krasnolud).");
-              setSets(prev=>{
-                const n=[...prev]; n[i] = { ...n[i], dwarfPassiveArmed: true }; return n;
-              });
-              addLog(`⛏️ P${i+1} uzbraja hibernację (po spadku do 0 HP: hibernacja 2 tury — niewrażliwy, możliwy do podniesienia).`);
-            }}
-            disabled={c.dwarfPassiveArmed}
-          >
-            {c.dwarfPassiveArmed ? "Uzbrojone" : "Uzbrój (1 akcja)"}
-          </button>
-        </div>
-      )}
+    const toHitNeed = enemy.toHit + (enemyCurse[enemy.id] > 0 ? 3 : 0); // przekleństwo utrudnia trafienie
+    let lines = [`👹 Wróg: ${enemy.name} → cel: Postać ${targetIndex + 1}`];
+    const roll20 = d(20);
+    const hit = roll20 >= toHitNeed;
+    lines.push(`🎲 Trafienie: k20=${roll20} vs próg ${toHitNeed}${enemyCurse[enemy.id] > 0 ? " (przekleństwo +3)" : ""} → ${hit ? "✅" : "❌"}`);
 
-      {/* FAEYKAI — maska (−3 po pęknięciu) + 3× błog./klątwa */}
-      {c.race === "Faeykai" && (
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", gap: 8, alignItems:"center", flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 600 }}>Faeykai (3×/odp.):</div>
-            <div>Maska: {c.faeykaiMaskBroken ? "🔴 pęknięta (−3 do trafienia czarami)" : "🟢 sprawna"} <small style={{opacity:.7}}>(pęka &lt;21% max HP; odnawia się przy odpoczynku)</small></div>
-          </div>
+    if (!hit) {
+      if (typeof forced === "number") setForcedTarget((prev) => ({ ...prev, [enemy.id]: null }));
+      return addLog(lines.join("\n"));
+    }
 
-          {/* 3 ładunki */}
-          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-            {Array.from({ length: 3 }).map((_, idx) => {
-              const used = idx >= (3 - (c.faeykaiChargesLeft || 0));
-              return (
-                <div
-                  key={idx}
-                  onClick={()=>{
-                    if (used) return;
-                    if (!spendPlayerAction(i)) return addLog("❌ Brak akcji (Faeykai).");
-                    setSets(prev=>{
-                      const n=[...prev]; const me={...n[i]};
-                      me.faeykaiPending = { mode:"bless", targetKind:"player", playerIndex:0, enemyId:"" };
-                      n[i]=me; return n;
-                    });
-                  }}
-                  title={used ? "Zużyte" : "Kliknij (zużywa 1 akcję)"}
-                  style={{
-                    width: 18, height: 18,
-                    background: used ? "#c62828" : "#2e7d32",
-                    borderRadius: 3, cursor: used ? "not-allowed" : "pointer",
-                    border: "1px solid #0004"
-                  }}
-                />
-              );
-            })}
-          </div>
+    // tarcza Maga na celu?
+    let incoming = d(enemy.dmgDie);
+    lines.push(`💥 Rzut na obrażenia: k${enemy.dmgDie}=${incoming}`);
 
-          {c.faeykaiPending && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(140px, 1fr))", gap: 8, marginTop: 6 }}>
-              <label>Efekt
-                <select
-                  value={c.faeykaiPending.mode}
-                  onChange={(e)=>setSets(prev=>{
-                    const n=[...prev]; const me={...n[i]};
-                    me.faeykaiPending = { ...me.faeykaiPending, mode: e.target.value };
-                    n[i]=me; return n;
-                  })}
-                >
-                  <option value="bless">Błogosławieństwo (+3 HP/ turę przez 3 tury)</option>
-                  <option value="curse">Przekleństwo (−3 do trafienia przez 3 tury)</option>
-                </select>
-              </label>
+    let reflected = 0;
 
-              <label>Cel
-                <select
-                  value={c.faeykaiPending.targetKind}
-                  onChange={(e)=>setSets(prev=>{
-                    const n=[...prev]; const me={...n[i]};
-                    me.faeykaiPending = { ...me.faeykaiPending, targetKind: e.target.value };
-                    n[i]=me; return n;
-                  })}
-                >
-                  <option value="player">Postać</option>
-                  <option value="enemy">Wróg</option>
-                </select>
-              </label>
+    // krasnolud w hibernacji — ignoruje obrażenia
+    if (target.dwarfHibernating) {
+      lines.push(`🛌 Cel w hibernacji — obrażenia zignorowane.`);
+    } else {
+      // redukcje
+      if (enemy.dmgType === "magiczny") {
+        incoming = Math.max(0, incoming - Number(target.magicDefense ?? 0));
+        lines.push(`🛡️ Redukcja: − Obrona magii (${target.magicDefense}) → ${incoming}`);
+      } else {
+        incoming = Math.max(0, incoming - Number(target.armor ?? 0));
+        lines.push(`🛡️ Redukcja: − Pancerz (${target.armor}) → ${incoming}`);
+      }
 
-              {c.faeykaiPending.targetKind === "player" ? (
-                <label>Postać
-                  <select
-                    value={c.faeykaiPending.playerIndex}
-                    onChange={(e)=>setSets(prev=>{
-                      const n=[...prev]; const me={...n[i]};
-                      me.faeykaiPending = { ...me.faeykaiPending, playerIndex: Number(e.target.value) };
-                      n[i]=me; return n;
-                    })}
-                  >
-                    {sets.map((_, idx)=><option key={idx} value={idx}>Postać {idx+1}</option>)}
-                  </select>
-                </label>
-              ) : (
-                <label>Wróg
-                  <select
-                    value={c.faeykaiPending.enemyId}
-                    onChange={(e)=>setSets(prev=>{
-                      const n=[...prev]; const me={...n[i]};
-                      me.faeykaiPending = { ...me.faeykaiPending, enemyId: e.target.value };
-                      n[i]=me; return n;
-                    })}
-                  >
-                    <option value="">—</option>
-                    {enemies.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                  </select>
-                </label>
-              )}
+      // tarcza maga (jeżeli cel ma)
+      if ((target.mageShield || 0) > 0) {
+        const use = Math.min(target.mageShield, incoming);
+        reflected = use;
+        incoming = Math.max(0, incoming - use);
 
-              <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
-                <button
-                  onClick={()=>{
-                    const p = c.faeykaiPending; if (!p) return;
-                    // zużyj ładunek
-                    setSets(prev=>{
-                      const n=[...prev]; const me={...n[i]};
-                      me.faeykaiChargesLeft = Math.max(0, (me.faeykaiChargesLeft||0) - 1);
-                      n[i]=me; return n;
-                    });
+        setSets((prev) => {
+          const next = [...prev];
+          const t = { ...next[targetIndex] };
+          t.mageShield = Math.max(0, (t.mageShield || 0) - use);
+          next[targetIndex] = t;
+          return next;
+        });
 
-                    if (p.mode==="bless") {
-                      if (p.targetKind==="player") {
-                        setSets(prev=>{
-                          const n=[...prev]; const trg={...n[p.playerIndex]};
-                          trg.effects = [ ...(trg.effects||[]), { type:"bless", value:3, turnsLeft:3 } ];
-                          n[p.playerIndex] = trg; return n;
-                        });
-                        addLog(`🌱 Faeykai P${i+1} błogosławi P${(p.playerIndex)+1}: +3 HP/ turę (3 tury).`);
-                      } else {
-                        setEnemies(prev => prev.map(e => e.id===p.enemyId ? { ...e, bless:{ value:3, turnsLeft:3 } } : e));
-                        addLog(`🌱 Faeykai P${i+1} błogosławi ${p.enemyId}: +3 HP/ turę (3 tury).`);
-                      }
-                    } else {
-                      if (p.targetKind==="player") {
-                        setSets(prev=>{
-                          const n=[...prev]; const trg={...n[p.playerIndex]};
-                          trg.effects = [ ...(trg.effects||[]), { type:"curseToHit", value:3, turnsLeft:3 } ];
-                          n[p.playerIndex] = trg; return n;
-                        });
-                        addLog(`🌑 Faeykai P${i+1} przeklina P${(p.playerIndex)+1}: −3 do trafienia (3 tury).`);
-                      } else {
-                        setEnemies(prev => prev.map(e => e.id===p.enemyId ? { ...e, cursed: Math.max(e.cursed||0, 3) } : e));
-                        addLog(`🌑 Faeykai P${i+1} przeklina ${p.enemyId}: +3 do progu trafienia (3 tury).`);
-                      }
-                    }
+        lines.push(`🔮 Tarcza Maga: −${use} obrażeń, odbija ${use} we wroga.`);
+        if (reflected > 0) damageEnemy(enemy.id, reflected);
+      }
 
-                    // zamknij konfigurator
-                    setSets(prev=>{
-                      const n=[...prev]; const me={...n[i]}; me.faeykaiPending = null; n[i]=me; return n;
-                    });
-                  }}
-                >
-                  Zastosuj efekt
-                </button>
-                <button
-                  onClick={()=>{
-                    setSets(prev=>{
-                      const n=[...prev]; const me={...n[i]}; me.faeykaiPending = null; n[i]=me; return n;
-                    });
-                    addLog("ℹ️ Anulowano konfigurację Faeykai (akcja pozostała zużyta).");
-                  }}
-                  style={{ opacity: .8 }}
-                >
-                  Anuluj
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+      // zadaj obrażenia celowi
+      if (incoming > 0) {
+        setSets((prev) => {
+          const next = [...prev];
+          const cur = { ...next[targetIndex] };
+          const before = cur.hp ?? 0;
+          cur.hp = Math.max(0, before - incoming);
 
-  /* ===================== Przejście tury ===================== */
+          // Faeykai: maska pęka poniżej 10%
+          if (cur.race === "Faeykai") {
+            const thresh = Math.ceil((cur.maxHp || 20) * 0.1);
+            if (cur.hp < thresh) cur.faeykaiMaskBroken = true;
+          }
+
+          // Krasnolud: jeśli uzbrojony i spadnie do 0 → hibernacja 2 tury
+          if (cur.race === "Krasnolud" && cur.dwarfPassiveArmed && before > 0 && cur.hp <= 0) {
+            cur.dwarfHibernating = true;
+            cur.dwarfHibernateTurns = 2;
+            lines.push(`🛡️ Krasnolud: wchodzi w hibernację na 2 tury (niewrażliwy).`);
+          }
+
+          next[targetIndex] = cur;
+          return next;
+        });
+        lines.push(`❤️ HP Postaci ${targetIndex + 1} −${incoming}`);
+      }
+    }
+
+    // skonsumuj jednorazowe wymuszenie celu
+    if (typeof forced === "number") setForcedTarget((prev) => ({ ...prev, [enemy.id]: null }));
+
+    addLog(lines.join("\n"));
+  };
+
+  /* ===== PODNIEŚ SOJUSZNIKA ===== */
+  const reviveAlly = (casterIndex, targetIndex) => {
+    if (targetIndex == null) return addLog("❌ Wybierz sojusznika do podniesienia.");
+    const caster = sets[casterIndex];
+    const target = sets[targetIndex];
+
+    if ((caster.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji.");
+    if (!lockedSets[casterIndex]) return addLog("❌ Najpierw zatwierdź postać wykonującą akcję.");
+    if (!target || (target.hp ?? 0) > 0) return addLog("❌ Wybrana postać nie jest nieprzytomna/na 0 HP.");
+
+    // zużyj akcję i podnieś
+    spendAction(casterIndex);
+
+    const healValue = Math.floor((target.maxHp || 20) * 0.25);
+    setSets((prev) => {
+      const next = [...prev];
+      const t = { ...next[targetIndex] };
+      t.hp = healValue;
+      // jeśli był krasnolud w hibernacji — zakończ hibernację
+      t.dwarfHibernating = false;
+      t.dwarfHibernateTurns = 0;
+      next[targetIndex] = t;
+      return next;
+    });
+
+    addLog(`🛡️ Postać ${casterIndex + 1} podniosła Postać ${targetIndex + 1} → HP = ${healValue} (25% maksymalnego).`);
+
+    // wyczyść wybór w dropdownie
+    setReviveTargetIndex((prev) => {
+      const next = [...prev];
+      next[casterIndex] = null;
+      return next;
+    });
+  };
+
+  /* ===== TURY: „Następna tura” ===== */
   const nextTurn = () => {
-    // gracze
-    setSets(prev => prev.map((c, idx) => {
-      const me = { ...c, actionsLeft: 2 };
+    // Postacie
+    setSets((prev) => {
+      const next = prev.map((c, idx) => {
+        const me = { ...c };
 
-      // wygaszenie ludzkiego buffa na końcu tury
-      if (me.humanBuff && me.humanBuff.expiresTurn < turn + 1) me.humanBuff = null;
+        // odśwież akcje
+        me.actionsLeft = 2;
 
-      // efekty: bless/curseToHit/buffToHit
-      if (me.effects?.length) {
-        me.effects = me.effects
-          .map(ef => {
-            if (ef.type==="bless" && ef.turnsLeft>0) {
-              me.hp = Math.min(me.maxHp||20, (me.hp||0) + (ef.value||0));
+        // Człowiek — buff wygasa z końcem zeszłej tury
+        if (me.humanBuff && me.humanBuff.expiresTurn < turn + 1) {
+          me.humanBuff = null;
+        }
+
+        // Elf: jeśli ładował w poprzedniej turze -> teraz eksplozja
+        if (me.race === "Elf" && me.elfChargeUsed && me.elfChargedTurn === turn) {
+          const before = me.hp || 0;
+          me.hp = Math.max(0, before - 5);
+          addLog(`🌩️ Elf (Postać ${idx + 1}) — eksplozja: −5 HP dla elfa, wrogowie −10 HP + ogłuszenie 1 turę.`);
+
+          setEnemyStates((prevEnemies) => {
+            const nxt = { ...prevEnemies };
+            for (const id of Object.keys(nxt)) {
+              nxt[id] = Math.max(0, nxt[id] - 10);
             }
-            return { ...ef, turnsLeft: (ef.turnsLeft||0) - 1 };
-          })
-          .filter(ef => ef.turnsLeft>0);
+            return nxt;
+          });
+          setEnemyStun((prevStun) => {
+            const nxt = { ...prevStun };
+            for (const id of Object.keys(nxt)) {
+              nxt[id] = Math.max(nxt[id], 1);
+            }
+            return nxt;
+          });
+
+          me.elfChargeUsed = false;
+          me.elfChargedTurn = null;
+        }
+
+        // Regeneracje/błogosławieństwa: +3 HP/turę
+        if (me.effects && me.effects.length) {
+          me.effects = me.effects
+            .map((ef) => {
+              if (ef.type === "bless" && ef.turnsLeft > 0) {
+                me.hp = Math.min(me.maxHp ?? 20, (me.hp ?? 0) + (ef.value || 0));
+                return { ...ef, turnsLeft: ef.turnsLeft - 1 };
+              }
+              return { ...ef, turnsLeft: ef.turnsLeft - 1 };
+            })
+            .filter((ef) => ef.turnsLeft > 0);
+        }
+
+        // Krasnolud: hibernacja tic
+        if (me.dwarfHibernating) {
+          me.dwarfHibernateTurns = Math.max(0, (me.dwarfHibernateTurns || 0) - 1);
+          if (me.dwarfHibernateTurns === 0) {
+            me.dwarfHibernating = false;
+            addLog(`⛏️ Krasnolud (Postać ${idx + 1}) kończy hibernację.`);
+          }
+        }
+
+        // Faeykai: maska pęknięta, jeśli HP < 10%
+        if (me.race === "Faeykai") {
+          const thresh = Math.ceil((me.maxHp || 20) * 0.1);
+          if ((me.hp || 0) < thresh) me.faeykaiMaskBroken = true;
+        }
+
+        return me;
+      });
+
+      return next;
+    });
+
+    // Wrogowie — tury efektów
+    setEnemyStun((prev) => {
+      const next = { ...prev };
+      for (const id of Object.keys(next)) next[id] = Math.max(0, next[id] - 1);
+      return next;
+    });
+    setEnemyCurse((prev) => {
+      const next = { ...prev };
+      for (const id of Object.keys(next)) next[id] = Math.max(0, next[id] - 1);
+      return next;
+    });
+    setEnemyDefenseDebuff((prev) => {
+      const next = { ...prev };
+      for (const id of Object.keys(next)) {
+        const t = next[id]?.turns || 0;
+        next[id] = t > 1 ? { ...next[id], turns: t - 1 } : { value: 0, turns: 0 };
       }
-
-      // Elf – eksplozja po 1 turze
-      if (me.race === "Elf" && me.elfChargeUsed && me.elfChargedTurn === turn) {
-        const before = me.hp||0;
-        me.hp = Math.max(0, before - 5);
-        addLog(`🌩️ Elf (P${idx+1}) — eksplozja: elf −5 HP; wrogowie −10 HP (ogłuszenie 1 turę).`);
-        setEnemies(prevE => prevE.map(e => ({ ...e, hp: Math.max(0, e.hp - 10) })));
-        me.elfChargeUsed = false; me.elfChargedTurn = null;
+      return next;
+    });
+    setEnemyArmorDebuff((prev) => {
+      const next = { ...prev };
+      for (const id of Object.keys(next)) {
+        const t = next[id]?.turns || 0;
+        next[id] = t > 1 ? { ...next[id], turns: t - 1 } : { factor: 1, turns: 0 };
       }
+      return next;
+    });
 
-      // Faeykai – maska pęka <21% max HP (kara do czarów −3)
-      if (me.race === "Faeykai") {
-        const thr = Math.ceil((me.maxHp||20) * 0.21);
-        if ((me.hp||0) < thr) me.faeykaiMaskBroken = true;
-      }
-
-      return me;
-    }));
-
-    // wrogowie
-    setEnemies(prev => prev.map(e => {
-      // bless
-      let hp = e.hp;
-      let bless = e.bless;
-      if (bless?.turnsLeft > 0) {
-        hp = Math.min(e.maxHp, hp + (bless.value || 0));
-        bless = { ...bless, turnsLeft: bless.turnsLeft - 1 };
-      } else bless = null;
-
-      // cursed
-      const cursed = Math.max(0, (e.cursed||0) - 1);
-
-      // defDown & armorHalved
-      let defDown = e.defDown;
-      if (defDown?.turnsLeft > 0) defDown = { ...defDown, turnsLeft: defDown.turnsLeft - 1 };
-      else defDown = null;
-
-      const armorHalvedTurns = Math.max(0, (e.armorHalvedTurns||0) - 1);
-
-      // tymczasowy buff do trafienia z Mrocznego Paktu — 1 tura
-      const tempToHitBuff = Math.max(0, (e.tempToHitBuff||0) - 1);
-      const toHit = (enemyTypes[e.type]?.toHit || e.toHit || 0) + (tempToHitBuff>0 ? 4 : 0);
-
-      return { ...e, actionsLeft: 2, hp, bless, cursed, defDown, armorHalvedTurns, tempToHitBuff, toHit };
-    }));
-
-    setTurn(t => t+1);
+    setTurn((t) => t + 1);
     addLog(`⏱️ Rozpoczyna się tura ${turn + 1}.`);
   };
 
-  /* ===================== Atak gracza (broń) — z klasami ===================== */
-  const [weaponChoice, setWeaponChoice] = useState("sword");
-  const [targetEnemyId, setTargetEnemyId] = useState(null);
-
-  const doPlayerAttack = () => {
-    const i = activeSet;
-    if (!lockedSets[i]) return addLog("❌ Najpierw zatwierdź postać.");
-    const c = getActiveChar();
-    if ((c.actionsLeft||0) <= 0) return addLog("❌ Brak akcji.");
-
-    const enemyId = targetEnemyId || selectedEnemyId;
-    const enemy = enemies.find(e => e.id===enemyId);
-    if (!enemy) return addLog("❌ Wybierz wroga.");
-
-    const w = weaponData[weaponChoice];
-    const statVal = Number(c[w.stat]||0);
-    const humanToHit = (c.race==="Człowiek" && c.humanBuff?.type==="tohit") ? 2 : 0;
-
-    const effDEF = effectiveEnemyDefense(enemy);
-    const roll20 = d(20);
-
-    // Łucznik (celny strzał): auto-hit, -5 DEF na 3 tury (tylko łuk)
-    const archerAuto = (c.clazz==="Łucznik" && c.archerReady && weaponChoice==="bow");
-    const toHit = archerAuto ? Infinity : (roll20 + statVal + humanToHit);
-    const hit = toHit >= effDEF;
-
-    const lines = [
-      `⚔️ P${i+1} atakuje (${w.name}) → ${enemy.name}`,
-      archerAuto
-        ? `🎯 Celny strzał (Łucznik): trafienie automatyczne`
-        : `🎯 Trafienie: k20=${roll20} + ${w.stat}(${statVal})${humanToHit? " + human(+2)": ""} = ${toHit} vs Obrona ${effDEF} → ${hit? "✅":"❌"}`
-    ];
-
-    if (!hit) { addLog(lines.join("\n")); return; }
-
-    // Obrażenia
-    let dmgDie = d(w.dmgDie);
-    let ignoreArmor = false;
-
-    // Wojownik: cios krytyczny → maks. kość, ignoruje pancerz
-    if (c.clazz==="Wojownik" && c.warriorReady) {
-      dmgDie = w.dmgDie; // maksymalna wartość kości
-      ignoreArmor = true;
-    }
-
-    const humanDmg = (c.race==="Człowiek" && c.humanBuff?.type==="dmg") ? 2 : 0;
-    const raw = dmgDie + humanDmg;
-    const effArmor = ignoreArmor ? 0 : effectiveEnemyArmor(enemy);
-    const dealt = Math.max(0, raw - effArmor);
-
-    lines.push(`🗡️ Obrażenia: ${ignoreArmor? "(ignoruje pancerz) ":""}k${w.dmgDie}=${dmgDie}${humanDmg? " + human(+2)": ""} = ${raw} − Pancerz(${effArmor}) = ${dealt}`);
-
-    // Strzelec: po trafieniu → -50% pancerza na 3 tury
-    if (c.clazz==="Strzelec" && c.shooterReady) {
-      setEnemies(prev => prev.map(e => e.id===enemy.id ? { ...e, armorHalvedTurns: 3 } : e));
-      lines.push(`🔻 Strzelec: pancerz ${enemy.name} −50% na 3 tury.`);
-    }
-
-    // Łucznik: po trafieniu → -5 DEF na 3 tury
-    if (archerAuto || (c.clazz==="Łucznik" && c.archerReady)) {
-      setEnemies(prev => prev.map(e => e.id===enemy.id ? { ...e, defDown: { amount:5, turnsLeft:3 } } : e));
-      lines.push(`📉 Łucznik: obrona ${enemy.name} −5 na 3 tury.`);
-    }
-
-    // zużyj przygotowanie (one-shot / odpoczynek)
-    if (c.clazz==="Wojownik" && c.warriorReady) {
-      setSets(prev=>{ const n=[...prev]; n[i]={...n[i], warriorReady:false}; return n; });
-    }
-    if (c.clazz==="Łucznik" && c.archerReady) {
-      setSets(prev=>{ const n=[...prev]; n[i]={...n[i], archerReady:false}; return n; });
-    }
-    if (c.clazz==="Strzelec" && c.shooterReady) {
-      setSets(prev=>{ const n=[...prev]; n[i]={...n[i], shooterReady:false}; return n; });
-    }
-
-    spendPlayerAction(i);
-    addLog(lines.join("\n"));
-    damageEnemyInstance(enemy.id, dealt);
-  };
-
-  /* ===================== Zaklęcia gracza (z maską −3 i klasą Maga) ===================== */
-const PLAYER_SPELLS = {
-  "Magiczny pocisk": { cost: 3, dmgDie: 6, type: "damage" },
-  "Wybuch energii":  { cost: 5, dmgDie: 4, type: "damage" },
-  "Zasklepienie ran":{ cost: 5, healDie: 6, type: "heal" },
-  "Oślepienie":      { cost: 8, type: "effect" },
-};
-const [playerSpell, setPlayerSpell] = useState("Magiczny pocisk");
-const [healTarget, setHealTarget] = useState(0);
-
-const castPlayerSpell = () => {
-  const i = activeSet;
-  if (!lockedSets[i]) return addLog("❌ Najpierw zatwierdź postać.");
-  const c = getActiveChar();
-  if ((c.actionsLeft||0) <= 0) return addLog("❌ Brak akcji.");
-
-  const spell = PLAYER_SPELLS[playerSpell];
-  if (!spell) return;
-  if ((c.essence||0) < spell.cost) return addLog(`❌ Esencja: ${c.essence} < koszt ${spell.cost}.`);
-
-  // pobierz koszt + akcję
-  setSets(prev => { const n=[...prev]; n[i] = { ...n[i], essence: (n[i].essence||0) - spell.cost }; return n; });
-  spendPlayerAction(i);
-
-  let lines = [`✨ P${i+1} rzuca „${playerSpell}” — koszt ${spell.cost} (Esencja po: ${(c.essence||0)-spell.cost})`];
-
-  // Leczenie
-  if (spell.type==="heal") {
-    const roll = d(spell.healDie);
-    setSets(prev => {
-      const n=[...prev]; const trg={...n[healTarget]};
-      trg.hp = Math.min(trg.maxHp||20, (trg.hp||0) + roll);
-      n[healTarget]=trg; return n;
-    });
-    lines.push(`💚 Leczenie: k${spell.healDie}=${roll} → P${healTarget+1} +${roll} HP`);
-    return addLog(lines.join("\n"));
-  }
-
-  // Efekt/Obrażenia → potrzebny wróg
-  const enemyId = targetEnemyId || selectedEnemyId;
-  const enemy = enemies.find(e => e.id===enemyId);
-  if (!enemy) return addLog("❌ Wybierz wroga.");
-
-  const MAG = Number(c.MAG||0);
-  const humanToHit = (c.race==="Człowiek" && c.humanBuff?.type==="tohit") ? 2 : 0;
-  const maskPenalty = (c.race==="Faeykai" && c.faeykaiMaskBroken) ? 3 : 0;
-  const toHitPenaltyFromCurses = (c.effects||[]).reduce((acc,ef)=> ef.type==="curseToHit" ? acc + (ef.value||0) : acc, 0);
-
-  const effDEF = effectiveEnemyDefense(enemy);
-  const roll20 = d(20);
-  const toHit = roll20 + MAG + humanToHit - maskPenalty - toHitPenaltyFromCurses;
-  const hit = toHit >= effDEF;
-
-  lines.push(
-    `🎯 Trafienie: k20=${roll20} + MAG(${MAG})` +
-    (humanToHit? " + human(+2)": "") +
-    (maskPenalty? ` − maska(−${maskPenalty})`:"") +
-    (toHitPenaltyFromCurses? ` − klątwy(−${toHitPenaltyFromCurses})`:"") +
-    ` = ${toHit} vs Obrona ${effDEF} → ${hit? "✅":"❌"}`
-  );
-  if (!hit) return addLog(lines.join("\n"));
-
-  if (spell.type==="damage") {
-    const rollDmg = d(spell.dmgDie);
-    const mod = statMod(MAG);
-    const humanDmg = (c.race==="Człowiek" && c.humanBuff?.type==="dmg") ? 2 : 0;
-    const raw = rollDmg + mod + humanDmg;
-    const reduced = Math.max(0, raw - (enemy.magicDefense||0));
-    lines.push(`💥 Obrażenia: k${spell.dmgDie}=${rollDmg} + mod(MAG)=${mod}${humanDmg? " + human(+2)": ""} = ${raw}`);
-    lines.push(`🛡️ Redukcja magią: −${enemy.magicDefense||0} → ${reduced}`);
-    addLog(lines.join("\n"));
-    damageEnemyInstance(enemy.id, reduced);
-
-    // Mag: tarcza = 50% zadanych obrażeń (po udanym czarze)
-    if (c.clazz==="Mag" && c.mageReady && reduced>0) {
-      const shield = Math.ceil(reduced * 0.5);
-      setSets(prev=>{ const n=[...prev]; n[i]={...n[i], mageShield: shield, mageReady:false}; return n; });
-      addLog(`🛡️🔮 P${i+1} (Mag): tarcza ustawiona na ${shield}.`);
-    }
-    return;
-  }
-
-  // Oślepienie — placeholder
-  if (spell.type==="effect") {
-    lines.push("🌑 Oślepienie: efekt do rozbudowy (statusy).");
-    return addLog(lines.join("\n"));
-  }
-};
-
-/* ===================== Funkcje ataków wroga ===================== */
- const doEnemyAttackWeapon = (enemyId, weaponKey, targetPlayerIndex) => {
-  setEnemies(prev => {
-    const n = [...prev];
-    const e = n.find(x => x.id === enemyId);
-    if (!e) return prev;
-
-    const weapon = weaponData[weaponKey];
-    const roll20 = d(20);
-    const target = sets[targetPlayerIndex];
-    const effDefense = target ? target.armor + 10 : 10;
-    const toHit = roll20 + statMod(e[weapon.stat] || 0);
-
-    const lines = [];
-    lines.push(`🎯 Wróg ${e.name} atakuje ${target?.name || `Postać ${targetPlayerIndex+1}`} bronią ${weapon.name}`);
-    lines.push(`   Trafienie: k20=${roll20} + mod = ${toHit} vs Obrona ${effDefense}`);
-
-    if (toHit >= effDefense) {
-      const dmgRoll = d(weapon.dmgDie);
-      const dmg = Math.max(0, dmgRoll - target.armor);
-      lines.push(`   Obrażenia: k${weapon.dmgDie}=${dmgRoll} - Pancerz(${target.armor}) = ${dmg}`);
-
-      setSets(prevSets => {
-        const s = [...prevSets];
-        const t = { ...s[targetPlayerIndex] };
-        const beforeHp = t.hp || 0;
-        t.hp = Math.max(0, beforeHp - dmg);
-
-        // 🔹 Sprawdzenie pęknięcia maski Faeykai
-        if (t.race === "Faeykai") {
-          const thr = Math.ceil((t.maxHp || 20) * 0.21);
-          if (!t.faeykaiMaskBroken && t.hp < thr) {
-            t.faeykaiMaskBroken = true;
-            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
-          }
-        }
-
-        s[targetPlayerIndex] = t;
-        return s;
-      });
-    } else {
-      lines.push(`❌ Pudło!`);
-    }
-
-    addLog(lines.join("\n"));
-    return n;
-  });
-};
-
-const doEnemySpellAuto = (enemyId, spellName, targetPlayerIndex) => {
-  setEnemies(prev => {
-    const n = [...prev];
-    const e = n.find(x => x.id === enemyId);
-    if (!e) return prev;
-
-    const lines = [];
-    lines.push(`🪄 Wróg ${e.name} rzuca zaklęcie ${spellName}`);
-
-    if (spellName === "Mroczny Pakt") {
-      if (e.essence < 2) { lines.push("❌ Brak esencji"); return n; }
-      e.essence -= 2;
-      setSets(prevSets => {
-        const s = [...prevSets];
-        const t = { ...s[targetPlayerIndex] };
-        t.hp = Math.max(0, t.hp - 4);
-        
-        // 🔹 Faeykai mask check
-        if (t.race === "Faeykai") {
-          const thr = Math.ceil((t.maxHp || 20) * 0.21);
-          if (!t.faeykaiMaskBroken && t.hp < thr) {
-            t.faeykaiMaskBroken = true;
-            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
-          }
-        }
-
-        s[targetPlayerIndex] = t;
-        return s;
-      });
-      e.toHit += 4;
-      lines.push(`   Cel traci 4 HP, ${e.name} zyskuje +4 do trafienia.`);
-    }
-
-    if (spellName === "Wyssanie życia") {
-      if (e.essence < 5) { lines.push("❌ Brak esencji"); return n; }
-      e.essence -= 5;
-      setSets(prevSets => {
-        const s = [...prevSets];
-        const t = { ...s[targetPlayerIndex] };
-        t.hp = Math.max(0, t.hp - 5);
-
-        // 🔹 Faeykai mask check
-        if (t.race === "Faeykai") {
-          const thr = Math.ceil((t.maxHp || 20) * 0.21);
-          if (!t.faeykaiMaskBroken && t.hp < thr) {
-            t.faeykaiMaskBroken = true;
-            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
-          }
-        }
-
-        s[targetPlayerIndex] = t;
-        return s;
-      });
-      e.hp = Math.min(e.maxHp, e.hp + 5);
-      lines.push(`   Cel traci 5 HP, ${e.name} odzyskuje 5 HP.`);
-    }
-
-    if (spellName === "Magiczny pocisk") {
-      if (e.essence < 3) { lines.push("❌ Brak esencji"); return n; }
-      e.essence -= 3;
-      const dmgRoll = d(6);
-      setSets(prevSets => {
-        const s = [...prevSets];
-        const t = { ...s[targetPlayerIndex] };
-        t.hp = Math.max(0, t.hp - dmgRoll);
-
-        // 🔹 Faeykai mask check
-        if (t.race === "Faeykai") {
-          const thr = Math.ceil((t.maxHp || 20) * 0.21);
-          if (!t.faeykaiMaskBroken && t.hp < thr) {
-            t.faeykaiMaskBroken = true;
-            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
-          }
-        }
-
-        s[targetPlayerIndex] = t;
-        return s;
-      });
-      lines.push(`   Magiczny pocisk trafia za ${dmgRoll} obrażeń.`);
-    }
-
-    addLog(lines.join("\n"));
-    return n;
-  });
-};
-
-const doSpyAOE = (enemyId, targetPlayerIndices) => {
-  setEnemies(prev => {
-    const n = [...prev];
-    const e = n.find(x => x.id === enemyId);
-    if (!e) return prev;
-
-    const lines = [];
-    lines.push(`💥 Szpieg ${e.name} rzuca Wybuch Energii!`);
-
-    if (e.essence < 5) { lines.push("❌ Brak esencji"); return n; }
-    e.essence -= 5;
-
-    targetPlayerIndices.forEach(idx => {
-      const dmgRoll = d(4);
-      setSets(prevSets => {
-        const s = [...prevSets];
-        const t = { ...s[idx] };
-        const beforeHp = t.hp || 0;
-        t.hp = Math.max(0, beforeHp - dmgRoll);
-
-        // 🔹 Faeykai mask check
-        if (t.race === "Faeykai") {
-          const thr = Math.ceil((t.maxHp || 20) * 0.21);
-          if (!t.faeykaiMaskBroken && t.hp < thr) {
-            t.faeykaiMaskBroken = true;
-            lines.push(`😱 Maska Faeykai pękła przy ${t.hp} HP (<21% max)! (−3 do trafienia czarami)`);
-          }
-        }
-
-        s[idx] = t;
-        return s;
-      });
-      lines.push(`   Postać ${idx+1} otrzymuje ${dmgRoll} obrażeń.`);
-    });
-
-    addLog(lines.join("\n"));
-    return n;
-  });
-};
-
-  /* ===================== JSX: Layout główny ===================== */
+  /* ===== UI ===== */
   return (
     <div style={{ padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
@@ -901,318 +865,316 @@ const doSpyAOE = (enemyId, targetPlayerIndices) => {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 16 }}>
-        {/* LEWA: Postacie + Test walki */}
+        {/* LEWA KOLUMNA — POSTACIE + TEST WALKI */}
         <div>
-          <h3>1) Postacie</h3>
-          {sets.map((c, i) => (
-            <div key={i} style={{ border: "1px solid #ccc", padding: 8, marginBottom: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems:"center" }}>
+          <h3>1) Statystyki postaci</h3>
+          {sets.map((set, i) => (
+            <div key={i} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
                 <strong>Postać {i + 1}</strong>
                 <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="radio" name="active" checked={activeSet===i} onChange={()=>setActiveSet(i)} />
+                  <input type="radio" name="activeSet" checked={activeSet === i} onChange={() => setActiveSet(i)} />
                   Aktywna
                 </label>
               </div>
 
-              <div>Imię: <input value={c.name} onChange={e => setSets(prev => { const n=[...prev]; n[i]={...n[i], name:e.target.value}; return n; })} /></div>
-              <div>Rasa:&nbsp;
-                <select value={c.race} onChange={e => setSets(prev => { const n=[...prev]; n[i]={...n[i], race:e.target.value}; return n; })}>
-                  <option>Człowiek</option><option>Elf</option><option>Krasnolud</option><option>Faeykai</option>
-                </select>
-              </div>
-              <div>Klasa:&nbsp;
-                <select value={c.clazz} onChange={e => setSets(prev => { const n=[...prev]; n[i]={...n[i], clazz:e.target.value}; return n; })}>
-                  <option>Wojownik</option><option>Łucznik</option><option>Strzelec</option><option>Mag</option><option>Dyplomata</option>
-                </select>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginTop: 6 }}>
+                <label>Imię <input value={set.name} onChange={(e) => updateSetField(i, "name", e.target.value)} /></label>
+                <label>Rasa
+                  <select value={set.race} onChange={(e) => updateSetField(i, "race", e.target.value)}>
+                    {RACES.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </label>
+                <label>Klasa
+                  <select value={set.clazz} onChange={(e) => updateSetField(i, "clazz", e.target.value)}>
+                    {CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+                <label>Akcje (na tę turę) <input type="number" value={set.actionsLeft ?? 0} readOnly /></label>
               </div>
 
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:6, marginTop:6 }}>
-                {["STR","DEX","PER","MAG","CHA"].map(k=>(
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginTop: 6 }}>
+                {["STR","DEX","PER","MAG","CHA"].map((k) => (
                   <label key={k}>{k}
-                    <input type="number" value={c[k] ?? ""} onChange={e=>setSets(prev=>{ const n=[...prev]; n[i]={...n[i],[k]: e.target.value===""? null : Number(e.target.value)}; return n; })} disabled={lockedSets[i]} />
-                    <small>mod: {c[k]!=null? statMod(Number(c[k])):"-"}</small>
+                    <input type="number" value={set[k] ?? ""} onChange={(e)=>updateSetField(i,k,e.target.value)} disabled={lockedSets[i]} />
+                    <small>mod: {set[k] != null ? statMod(Number(set[k])) : "-"}</small>
                   </label>
                 ))}
               </div>
 
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:6, marginTop:6 }}>
-                <label>HP<input type="number" value={c.hp} onChange={e=>setSets(prev=>{ const n=[...prev]; n[i]={...n[i], hp:Number(e.target.value)}; return n; })} /></label>
-                <label>Max HP<input type="number" value={c.maxHp} onChange={e=>setSets(prev=>{ const n=[...prev]; n[i]={...n[i], maxHp:Number(e.target.value)}; return n; })} /></label>
-                <label>Esencja<input type="number" value={c.essence} onChange={e=>setSets(prev=>{ const n=[...prev]; n[i]={...n[i], essence:Number(e.target.value)}; return n; })} /></label>
-                <label>Max Esencja<input type="number" value={c.maxEssence} onChange={e=>setSets(prev=>{ const n=[...prev]; n[i]={...n[i], maxEssence:Number(e.target.value)}; return n; })} /></label>
-                <label>Pancerz<input type="number" value={c.armor} onChange={e=>setSets(prev=>{ const n=[...prev]; n[i]={...n[i], armor:Number(e.target.value)}; return n; })} /></label>
-                <label>Obrona magii<input type="number" value={c.magicDefense} onChange={e=>setSets(prev=>{ const n=[...prev]; n[i]={...n[i], magicDefense:Number(e.target.value)}; return n; })} /></label>
-                <div>Akcje: {c.actionsLeft}</div>
-                <div>Maska: {c.race==="Faeykai" ? (c.faeykaiMaskBroken? "🔴 pęknięta (−3)" : "🟢 sprawna") : "-"}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 6 }}>
+                <label>HP <input type="number" value={set.hp} onChange={(e)=>updateSetField(i,"hp",e.target.value)} /></label>
+                <label>Max HP <input type="number" value={set.maxHp} onChange={(e)=>updateSetField(i,"maxHp",e.target.value)} /></label>
+                <label>Esencja <input type="number" value={set.essence} onChange={(e)=>updateSetField(i,"essence",e.target.value)} /></label>
+                <label>Max Esencja <input type="number" value={set.maxEssence} onChange={(e)=>updateSetField(i,"maxEssence",e.target.value)} /></label>
+                <label>Pancerz <input type="number" value={set.armor} onChange={(e)=>updateSetField(i,"armor",e.target.value)} /></label>
+                <label>Obrona magii <input type="number" value={set.magicDefense} onChange={(e)=>updateSetField(i,"magicDefense",e.target.value)} /></label>
               </div>
 
-              {/* Klasy: przyciski przygotowania */}
-              <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:6 }}>
-                {c.clazz === "Wojownik" && !c.classUsed && (
-                  <button onClick={() => {
-                    if (!spendPlayerAction(i)) return addLog("❌ Brak akcji (Wojownik).");
-                    setSets(prev => { const n=[...prev]; n[i] = { ...n[i], warriorReady: true, classUsed: true }; return n; });
-                    addLog(`⚔️ ${c.name || `P${i+1}`} przygotowuje cios krytyczny.`);
-                  }}>Wojownik: Cios krytyczny</button>
+              {/* RASOWE UI */}
+              <div style={{ marginTop: 8, borderTop: "1px dashed #ccc", paddingTop: 8 }}>
+                {set.race === "Człowiek" && (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <strong>Rasowe (Człowiek):</strong>
+                      <select value={set.humanPendingChoice} onChange={(e)=>updateSetField(i, "humanPendingChoice", e.target.value)}>
+                        <option value="dmg">+2 do obrażeń (do końca tury)</option>
+                        <option value="tohit">+2 do trafienia (do końca tury)</option>
+                        <option value="hp">+2 HP natychmiast</option>
+                      </select>
+                      <small>5×/odpoczynek</small>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {set.humanCharges.map((used, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => useHumanCharge(i, idx)}
+                          style={{
+                            width: 18, height: 18, borderRadius: 3, border: "1px solid #555",
+                            background: used ? "#e74c3c" : "#2ecc71", cursor: used ? "not-allowed" : "pointer"
+                          }}
+                          title={used ? "Zużyte" : "Użyj (1 akcja)"}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 )}
-                {c.clazz === "Łucznik" && !c.classUsed && (
-                  <button onClick={() => {
-                    if (!spendPlayerAction(i)) return addLog("❌ Brak akcji (Łucznik).");
-                    setSets(prev => { const n=[...prev]; n[i] = { ...n[i], archerReady: true, classUsed: true }; return n; });
-                    addLog(`🏹 ${c.name || `P${i+1}`} przygotowuje celny strzał.`);
-                  }}>Łucznik: Celny strzał</button>
+
+                {set.race === "Elf" && (
+                  <div>
+                    <strong>Rasowe (Elf):</strong> 1×/odp. Ładowanie → następna tura: eksplozja.
+                    <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                      <button
+                        onClick={() => useElfCharge(i)}
+                        disabled={set.elfChargeUsed}
+                        style={{ padding: "2px 8px", background: set.elfChargeUsed ? "#e74c3c" : "#2ecc71" }}
+                        title="1 akcja"
+                      >
+                        {set.elfChargeUsed ? "Naładowane" : "Ładuj energię"}
+                      </button>
+                    </div>
+                  </div>
                 )}
-                {c.clazz === "Strzelec" && !c.classUsed && (
-                  <button onClick={() => {
-                    if (!spendPlayerAction(i)) return addLog("❌ Brak akcji (Strzelec).");
-                    setSets(prev => { const n=[...prev]; n[i] = { ...n[i], shooterReady: true, classUsed: true }; return n; });
-                    addLog(`🔫 ${c.name || `P${i+1}`} przygotowuje druzgocący strzał.`);
-                  }}>Strzelec: Druzgocący strzał</button>
+
+                {set.race === "Krasnolud" && (
+                  <div>
+                    <strong>Rasowe (Krasnolud):</strong> 1×/odp. Hibernacja po spadku do 0 HP (2 tury niewrażliwy).
+                    <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                      <button
+                        onClick={() => armDwarfHibernate(i)}
+                        disabled={set.dwarfPassiveArmed}
+                        style={{ padding: "2px 8px", background: set.dwarfPassiveArmed ? "#e74c3c" : "#2ecc71" }}
+                        title="1 akcja"
+                      >
+                        {set.dwarfPassiveArmed ? "Uzbrojone" : "Uzbrój hibernację"}
+                      </button>
+                      {set.dwarfHibernating && <span>🛌 Hibernacja: {set.dwarfHibernateTurns} t.</span>}
+                    </div>
+                  </div>
                 )}
-                {c.clazz === "Mag" && !c.classUsed && (
-                  <button onClick={() => {
-                    if (!spendPlayerAction(i)) return addLog("❌ Brak akcji (Mag).");
-                    setSets(prev => { const n=[...prev]; n[i] = { ...n[i], mageReady: true, classUsed: true }; return n; });
-                    addLog(`🪄 ${c.name || `P${i+1}`} przygotowuje tarczę po najbliższym czarze.`);
-                  }}>Mag: Tarcza po czarze</button>
+
+                {set.race === "Faeykai" && (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <strong>Rasowe (Faeykai):</strong>
+                      <span>Pozostało: {set.faeykaiChargesLeft}</span>
+                      <span>Maska: {set.faeykaiMaskBroken ? "❌ pęknięta" : "✅ ok"}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <label>
+                        Błogosławieństwo → Postać:
+                        <select onChange={()=>{}} value="">
+                          <option value="" disabled>Wybierz</option>
+                          {sets.map((_, idx) => <option key={idx} value={idx}>Postać {idx + 1}</option>)}
+                        </select>
+                      </label>
+                      <button
+                        onClick={() => {
+                          const raw = prompt("Podaj numer Postaci 1-4 (błogosławieństwo +3 HP/3 tury):");
+                          const tIdx = Number(raw) - 1;
+                          if (tIdx >= 0 && tIdx < sets.length) useFaeykaiBless(i, tIdx);
+                        }}
+                        disabled={(set.faeykaiChargesLeft || 0) <= 0}
+                        title="1 akcja"
+                      >
+                        🌿 Rzuć błogosławieństwo
+                      </button>
+
+                      <label>
+                        Przekleństwo → Wróg:
+                        <select onChange={()=>{}} value="">
+                          <option value="" disabled>Wybierz</option>
+                          {ENEMIES.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                        </select>
+                      </label>
+                      <button
+                        onClick={() => {
+                          const id = prompt("Podaj id wroga: cultist / warrior (przekleństwo −3 do trafienia na 3 tury)");
+                          if (id === "cultist" || id === "warrior") useFaeykaiCurse(i, id);
+                        }}
+                        disabled={(set.faeykaiChargesLeft || 0) <= 0}
+                        title="1 akcja"
+                      >
+                        🕯️ Rzuć przekleństwo
+                      </button>
+                    </div>
+                    <small>Jeśli Faeykai ma &lt; 10% max HP i jest poza ojczyzną, zaklęcia mają −5 do trafienia do czasu odpoczynku/maski.</small>
+                  </div>
                 )}
               </div>
 
-              {/* Dyplomata: wymuszenie ataku wroga na gracza */}
-              {c.clazz === "Dyplomata" && !c.classUsed && (
-                <div style={{ marginTop: 8, border: "1px dashed #aaa", padding: 6 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Dyplomata: Zmuszenie wroga do ataku</div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-                    <label>Wróg do zmuszenia
-                      <select id={`dip-src-${i}`}>
-                        <option value="">—</option>
-                        {enemies.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              {/* KLASOWE */}
+              <div style={{ marginTop: 8, borderTop: "1px dashed #ccc", paddingTop: 8 }}>
+                <strong>Umiejętność klasowa (1×/odp):</strong>
+                {set.clazz === "Dyplomata" && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                    <label>Wróg:
+                      <select value={diploEnemy} onChange={(e)=>setDiploEnemy(e.target.value)}>
+                        {ENEMIES.map((e)=><option key={e.id} value={e.id}>{e.name}</option>)}
                       </select>
                     </label>
-                    <label>Cel (gracz)
-                      <select id={`dip-tgtp-${i}`}>
-                        {sets.map((_, idx)=> <option key={idx} value={idx}>Postać {idx+1}</option>)}
+                    <label>Cel (postać):
+                      <select value={diploTarget} onChange={(e)=>setDiploTarget(Number(e.target.value))}>
+                        {sets.map((_, idx)=><option key={idx} value={idx}>Postać {idx+1}</option>)}
                       </select>
                     </label>
                   </div>
+                )}
+                <div style={{ marginTop: 6 }}>
+                  <button onClick={() => useClassPower(i)} disabled={set.classUsed} title="1 akcja">
+                    {set.classUsed ? "Użyto" : `Użyj (${set.clazz})`}
+                  </button>
+                  {/* Wskaźniki „ready” */}
+                  {set.warriorReady && <span style={{ marginLeft: 8 }}>🗡️ Wojownik: maks. cios gotowy</span>}
+                  {set.archerReady && <span style={{ marginLeft: 8 }}>🏹 Łucznik: celny strzał gotowy</span>}
+                  {set.shooterReady && <span style={{ marginLeft: 8 }}>🔫 Strzelec: druzgocący strzał gotowy</span>}
+                  {set.mageReady && <span style={{ marginLeft: 8 }}>🔮 Mag: tarcza po nast. czarze</span>}
+                  {set.mageShield > 0 && <span style={{ marginLeft: 8 }}>🛡️ Tarcza: {set.mageShield}</span>}
+                </div>
+              </div>
+
+              {/* PODNIEŚ SOJUSZNIKA */}
+              <div style={{ marginTop: 8, borderTop: "1px dashed #ccc", paddingTop: 8 }}>
+                <strong>Podnieś sojusznika (1 akcja):</strong>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+                  <label>
+                    Wybierz:
+                    <select
+                      value={reviveTargetIndex[i] ?? ""}
+                      onChange={(e)=>setReviveTargetIndex(prev=>{
+                        const nxt = [...prev];
+                        nxt[i] = e.target.value === "" ? null : Number(e.target.value);
+                        return nxt;
+                      })}
+                      style={{ marginLeft: 6 }}
+                    >
+                      <option value="">—</option>
+                      {sets.map((s, idx)=>(
+                        (idx !== i && (s.hp ?? 0) <= 0) ? <option key={idx} value={idx}>Postać {idx+1}</option> : null
+                      ))}
+                    </select>
+                  </label>
                   <button
-                    onClick={()=>{
-                      const srcSel = document.getElementById(`dip-src-${i}`);
-                      const tgtSel = document.getElementById(`dip-tgtp-${i}`);
-                      const instId = srcSel?.value || "";
-                      const playerIdx = Number(tgtSel?.value || 0);
-
-                      if (!instId) return addLog("❌ Wybierz wroga do zmuszenia.");
-                      // test charyzmy: d20 + CHA >= 10
-                      const roll = d(20);
-                      const CHA = Number(c.CHA||0);
-                      const ok = (roll + CHA) >= 10;
-
-                      const lines = [
-                        `🗣️ P${i+1} (Dyplomata) próbuje zmusić ${instId} do ataku na P${playerIdx+1}`,
-                        `🎲 Test CHARYZMY: k20=${roll} + CHA(${CHA}) = ${roll+CHA} vs 10 → ${ok? "✅":"❌"}`
-                      ];
-
-                      if (!ok) { addLog(lines.join("\n")); return; }
-
-                      setForcedOrders(prev => ({ ...prev, [instId]: { kind:"player", target: playerIdx } }));
-                      setSets(prev => { const n=[...prev]; n[i]={...n[i], classUsed:true}; return n; });
-                      lines.push(`📜 Rozkaz zapisany: ${instId} ma zaatakować P${playerIdx+1} przy swojej akcji.`);
-                      addLog(lines.join("\n"));
-                    }}
+                    onClick={()=>reviveAlly(i, reviveTargetIndex[i])}
+                    disabled={reviveTargetIndex[i]==null}
                   >
-                    Zastosuj rozkaz (zużywa 1 użycie klasy)
+                    🛡️ Podnieś
                   </button>
                 </div>
-              )}
+                <small>Przywraca 25% Max HP. Jeśli krasnolud był w hibernacji — kończy hibernację.</small>
+              </div>
 
-              {/* Zatwierdź / Odpoczynek */}
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
                 <button onClick={() => lockSet(i)} disabled={lockedSets[i]}>✔️ Zatwierdź</button>
                 <button onClick={() => restSet(i)}>💤 Odpocznij</button>
               </div>
-
-              {/* Pasywki rasowe */}
-              <RacePassivesPanel c={c} i={i} />
-
-              {/* Podnieś sojusznika (25% max HP) */}
-              <div style={{ marginTop: 8 }}>
-                <label>Podnieś sojusznika:&nbsp;
-                  <select
-                    value={c.reviveChoice ?? ""}
-                    onChange={(e)=>{
-                      const val = e.target.value===""? null : Number(e.target.value);
-                      setSets(prev => { const n=[...prev]; n[i] = { ...n[i], reviveChoice: val }; return n; });
-                    }}
-                  >
-                    <option value="">—</option>
-                    {sets.map((s, idx)=> (idx!==i && (s.hp||0)<=0) ? <option key={idx} value={idx}>Postać {idx+1}</option> : null)}
-                  </select>
-                </label>
-                <button
-                  onClick={()=>{
-                    const t = sets[i].reviveChoice;
-                    if (t==null) return addLog("❌ Wybierz sojusznika do podniesienia.");
-                    if (!spendPlayerAction(i)) return addLog("❌ Brak akcji.");
-                    const heal = Math.floor((sets[t].maxHp||20)*0.25);
-                    setSets(prev => {
-                      const n=[...prev]; const trg={...n[t]};
-                      trg.hp=heal; trg.dwarfHibernating=false; trg.dwarfHibernateTurns=0; trg.dwarfPassiveArmed=false;
-                      n[t]=trg; return n;
-                    });
-                    addLog(`🛡️ P${i+1} podnosi P${t+1} → HP = ${heal}.`);
-                  }}
-                  disabled={sets[i].reviveChoice==null}
-                  style={{ marginLeft: 8 }}
-                >
-                  🛡️ Podnieś
-                </button>
-              </div>
             </div>
           ))}
 
-          {/* Test walki (gracz) */}
+          {/* Test walki */}
           <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-            <h3>2) Test walki (gracz → wróg)</h3>
-            <div style={{ display: "grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
-              <label>Broń
-                <select value={weaponChoice} onChange={e=>setWeaponChoice(e.target.value)}>
-                  <option value="sword">Miecz krótki (STR)</option>
-                  <option value="bow">Łuk (PER)</option>
-                  <option value="staff">Kij magiczny (MAG)</option>
-                </select>
-              </label>
-              <label>Wróg (cel)
-                <select value={targetEnemyId || selectedEnemyId || ""} onChange={e=>setTargetEnemyId(e.target.value)}>
-                  <option value="">—</option>
-                  {enemies.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              </label>
-              <label>Esencja aktywnego
-                <input type="number" value={getActiveChar().essence} readOnly />
-              </label>
-            </div>
-            <div style={{ marginTop: 8, display:"flex", gap:8 }}>
-              <button onClick={doPlayerAttack}>⚔️ Wykonaj atak</button>
-            </div>
+            <h3>2) Test walki</h3>
 
-            <div style={{ borderTop:"1px solid #eee", marginTop:8, paddingTop:8 }}>
-              <h4>Zaklęcia (gracz)</h4>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
-                <label>Zaklęcie
-                  <select value={playerSpell} onChange={e=>setPlayerSpell(e.target.value)}>
-                    {Object.keys(PLAYER_SPELLS).map(n=><option key={n} value={n}>{n}</option>)}
+            <div style={{ borderTop: "1px solid #eee", paddingTop: 8 }}>
+              <h4>Atak</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                <label>Broń
+                  <select value={weapon} onChange={(e)=>setWeapon(e.target.value)}>
+                    <option value="sword">Miecz krótki (STR)</option>
+                    <option value="bow">Łuk (PER)</option>
+                    <option value="musket">Muszkiet (PER)</option>
+                    <option value="staff">Kij magiczny (MAG)</option>
                   </select>
                 </label>
-                <label>Cel leczenia (Zasklepienie)
-                  <select value={healTarget} onChange={e=>setHealTarget(Number(e.target.value))}>
-                    {sets.map((_, idx)=><option key={idx} value={idx}>Postać {idx+1}</option>)}
-                  </select>
-                </label>
-                <label>Obrona magii celu
-                  <input type="number" value={(enemies.find(e=>e.id===(targetEnemyId||selectedEnemyId))?.magicDefense)||0} readOnly />
-                </label>
+                <label>Obrona celu <input type="number" value={effectiveEnemyDefense(chosenEnemyId)} readOnly /></label>
+                <label>Pancerz celu <input type="number" value={effectiveEnemyArmor(chosenEnemyId)} readOnly /></label>
+                <label>Obrona magii <input type="number" value={enemyMagicDefense} readOnly /></label>
               </div>
               <div style={{ marginTop: 8 }}>
-                <button onClick={castPlayerSpell}>✨ Rzuć zaklęcie</button>
+                <button onClick={doAttack}>⚔️ Wykonaj atak</button>
+              </div>
+            </div>
+
+            <div style={{ borderTop: "1px solid #eee", paddingTop: 8, marginTop: 8 }}>
+              <h4>Zaklęcia</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                <label>Zaklęcie
+                  <select value={selectedSpellName} onChange={(e)=>setSelectedSpellName(e.target.value)}>
+                    {Object.keys(SPELLS).map((n)=> <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+                <label>Obrona magii <input type="number" value={enemyMagicDefense} readOnly /></label>
+                <label>Esencja (aktywny) <input type="number" value={getActiveStats().essence} readOnly /></label>
+              </div>
+              {selectedSpellName === "Zasklepienie ran" && (
+                <div style={{ marginTop: 6 }}>
+                  <label>Cel leczenia:
+                    <select value={healTarget} onChange={(e)=>setHealTarget(Number(e.target.value))}>
+                      {sets.map((_, idx)=> <option key={idx} value={idx}>Postać {idx+1}</option>)}
+                    </select>
+                  </label>
+                </div>
+              )}
+              <div style={{ marginTop: 8 }}>
+                <button onClick={castSelectedSpell}>✨ Rzuć zaklęcie</button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* ŚRODEK: Wrogowie */}
+        {/* ŚRODKOWA KOLUMNA — WROGOWIE */}
         <div>
           <h3>3) Wrogowie</h3>
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 10, marginBottom: 10 }}>
-            <h4>Konfiguracja</h4>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-              {Object.keys(enemyTypes).map(typeName => (
-                <label key={typeName}>{typeName}:&nbsp;
-                  <input
-                    type="number"
-                    min={0}
-                    value={roster[typeName] ?? 0}
-                    onChange={(e)=>setRoster(prev=>({ ...prev, [typeName]: Number(e.target.value) }))}
-                  />
-                </label>
-              ))}
-            </div>
-            <button style={{ marginTop: 8 }} onClick={createEnemies}>➕ Dodaj do walki</button>
-          </div>
-
-          {enemies.length===0 ? (
-            <p style={{ opacity:.7 }}>Brak aktywnych wrogów — dodaj ich powyżej.</p>
-          ) : enemies.map(e => (
-            <div key={e.id} style={{ border:"1px solid #ddd", borderRadius:8, padding:8, marginBottom:8, background: (selectedEnemyId===e.id?"#eef":"#fff") }}>
-              <label style={{ display:"flex", alignItems:"center", gap:6 }}>
-                <input type="radio" name="enemy" checked={selectedEnemyId===e.id} onChange={()=>setSelectedEnemyId(e.id)} />
-                <strong>{e.name}</strong>
+          {ENEMIES.map((e) => (
+            <div key={e.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, marginBottom: 8, background: chosenEnemyId === e.id ? "#eef" : "#fff" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input type="radio" name="enemy" checked={chosenEnemyId === e.id} onChange={()=>setChosenEnemyId(e.id)} />
+                {e.name}
               </label>
-              <div>HP {e.hp}/{e.maxHp} | Esencja {e.essence}/{e.maxEssence} | Akcje: {e.actionsLeft}</div>
-              <div>Obrona: {effectiveEnemyDefense(e)} (bazowo {e.defense}) | Pancerz: {effectiveEnemyArmor(e)} (bazowo {e.armor}) | Obrona magii: {e.magicDefense}</div>
-              <div>Efekty: Bless {e.bless?.turnsLeft||0}t (+{e.bless?.value||0}/turę), Curse {e.cursed||0}t, DEF↓ {e.defDown?.turnsLeft||0}t, Armor½ {e.armorHalvedTurns||0}t</div>
+              <div>Obrona (bazowa): {e.defense} | Pancerz (bazowy): {e.armor} | Obrona magii: {e.magicDefense}</div>
+              <div>Efekty: Obrona −{enemyDefenseDebuff[e.id].value} ({enemyDefenseDebuff[e.id].turns} t.), Pancerz ×{enemyArmorDebuff[e.id].factor} ({enemyArmorDebuff[e.id].turns} t.)</div>
+              <div>Trafienie: {e.toHit} | Obrażenia: 1k{e.dmgDie} ({e.dmgType})</div>
+              <div>❤️ HP: {enemyStates[e.id]} | 🌀 Ogłuszenie: {enemyStun[e.id]} | ☠ Przekl.: {enemyCurse[e.id]} t.</div>
+              <button onClick={applyEnemy} style={{ marginTop: 6 }}>✔️ Ustaw jako cel</button>
             </div>
           ))}
         </div>
 
-        {/* PRAWA: Atak / Zaklęcie wroga */}
+        {/* PRAWA KOLUMNA — ATAK WROGA */}
         <div>
-          <h3>4) Akcje wroga</h3>
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 10 }}>
-            <label>Wybrany wróg:&nbsp;
-              <select value={selectedEnemyId || ""} onChange={(e)=>setSelectedEnemyId(e.target.value)}>
-                <option value="">—</option>
-                {enemies.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select>
-            </label>
-
-            <div style={{ marginTop: 8, display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-              <label>Broń
-                <select value={enemyWeaponChoice} onChange={(e)=>setEnemyWeaponChoice(e.target.value)}>
-                  <option value="sword">Miecz krótki (STR)</option>
-                  <option value="bow">Łuk (PER)</option>
-                  <option value="staff">Kij magiczny (MAG)</option>
-                </select>
-              </label>
-              <label>Cel → Postać
-                <select value={enemyTargetPlayer} onChange={(e)=>setEnemyTargetPlayer(Number(e.target.value))}>
-                  {sets.map((_, idx)=> <option key={idx} value={idx}>Postać {idx+1}</option>)}
-                </select>
-              </label>
-            </div>
-
-            <div style={{ marginTop: 6, display:"flex", gap:8, flexWrap:"wrap" }}>
-              <button onClick={()=>{
-                const instId = selectedEnemyId;
-                if (!instId) return addLog("❌ Wybierz wroga.");
-                doEnemyAttackWeapon(instId, enemyTargetPlayer);
-              }}>👹 Atak bronią</button>
-
-              <button onClick={()=>{
-                const instId = selectedEnemyId;
-                if (!instId) return addLog("❌ Wybierz wroga.");
-                doEnemySpellAuto(instId, enemyTargetPlayer);
-              }}>🪄 Zaklęcie (auto)</button>
-
-              {/* AOE dla Szpiega Magmaratora */}
-              <button onClick={()=>{
-                const instId = selectedEnemyId;
-                const inst = enemies.find(e=>e.id===instId);
-                if (!inst) return addLog("❌ Wybierz wroga.");
-                if (!inst.spells?.includes("Wybuch energii")) return addLog("❌ Wróg nie zna Wybuchu energii.");
-                doSpyAOE(instId);
-              }}>🧨 Wybuch energii (AOE)</button>
-            </div>
+          <h3>4) Atak wroga</h3>
+          <button onClick={enemyAttack}>👹 Wróg atakuje (cel: aktywna lub wymuszony)</button>
+          <div style={{ marginTop: 8 }}>
+            <div>Wymuszenie celu (Dyplomata): {Object.entries(forcedTarget).some(([,v])=>v!==null) ? "aktywne" : "brak"}</div>
           </div>
         </div>
       </div>
 
-      {/* LOG */}
+      {/* Log */}
       <div style={{ marginTop: 16, background: "#111", color: "#eee", padding: 10, borderRadius: 8, maxHeight: 260, overflow: "auto", fontSize: 13 }}>
         {log.map((line, i) => <div key={i}>{line}</div>)}
       </div>
     </div>
   );
 }
-
 
