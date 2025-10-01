@@ -358,13 +358,35 @@ export default function BattleSimulator() {
     let lines = [`✨ „${selectedSpellName}” — koszt ${spell.cost} (Esencja po: ${(c.essence||0)-spell.cost})`];
 
     if (spell.type === "damage") {
-      if (!selectedEnemyId) return addLog("❌ Wybierz wroga.");
-      const effDefense = effectiveEnemyDefense(selectedEnemyId);
-      const roll20 = d(20);
-      const toHit = roll20 + MAG - faeykaiPenalty + (c.race==="Człowiek" && c.humanBuff?.type==="tohit" ? 2 : 0);
-      const hit = toHit >= effDefense;
-      lines.push(`🎯 Trafienie: k20=${roll20} + MAG(${MAG})${faeykaiPenalty? " − Faeykai(−5)": ""}${(c.race==="Człowiek" && c.humanBuff?.type==="tohit")? " + human(+2)": ""} = ${toHit} vs Obrona ${effDefense} → ${hit? "✅":"❌"}`);
-      if (!hit) return addLog(lines.join("\n"));
+  if (!selectedEnemyId) return addLog("❌ Wybierz wroga.");
+  const effDefense = effectiveEnemyDefense(selectedEnemyId);
+  const roll20 = d(20);
+
+  // Obliczamy karę z pękniętej maski
+  let maskPenalty = 0;
+  if (c.race === "Faeykai" && c.faeykaiMaskBroken) {
+    maskPenalty = 3;
+  }
+
+  const toHit =
+    roll20 +
+    MAG -
+    faeykaiPenalty + // kara za bycie poza ojczyzną
+    (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? 2 : 0) -
+    maskPenalty; // kara za pękniętą maskę
+
+  const hit = toHit >= effDefense;
+
+  lines.push(
+  `🎯 Trafienie: k20=${roll20} + MAG(${MAG})` +
+    (faeykaiPenalty ? " − Faeykai(−5)" : "") +
+    (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? " + human(+2)" : "") +
+    (maskPenalty ? ` − maska(−${maskPenalty})` : "") +
+    ` = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`
+);
+
+  if (!hit) return addLog(lines.join("\n"));
+}
 
       const rollDmg = d(spell.dmgDie);
       const mod = statMod(MAG);
@@ -498,8 +520,10 @@ export default function BattleSimulator() {
           t.hp = Math.max(0, before - incoming);
           if (t.race==="Faeykai") {
             const thr = Math.ceil((t.maxHp||20)*0.21);
-            if (t.hp < thr) t.faeykaiMaskBroken = true;
-          }
+            if (!char.faeykaiMaskBroken && char.hp < 0.21 * char.maxHp) {
+  char.faeykaiMaskBroken = true;
+  addLog(`😱 Maska Faeykai pęka! Od teraz rzuty na trafienie zaklęć mają −3 do końca walki.`);
+}
           if (t.race==="Krasnolud" && t.dwarfPassiveArmed && before>0 && t.hp<=0) {
             t.dwarfHibernating=true; t.dwarfHibernateTurns=2; t.dwarfPassiveArmed=false;
             lines.push("⛏️ Krasnolud: wchodzi w hibernację na 2 tury.");
@@ -819,11 +843,35 @@ export default function BattleSimulator() {
                 <label>Obrona magii <input type="number" value={set.magicDefense} onChange={(e)=>updateSetField(i,"magicDefense",e.target.value)} /></label>
               </div>
 
-              {/* Zatwierdź / Odpoczynek */}
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={() => lockSet(i)} disabled={lockedSets[i]}>✔️ Zatwierdź</button>
-                <button onClick={() => restSet(i)}>💤 Odpocznij</button>
-              </div>
+             {/* Zatwierdź / Odpoczynek */}
+<div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+  <button onClick={() => lockSet(i)} disabled={lockedSets[i]}>✔️ Zatwierdź</button>
+  <button onClick={() => {
+    setSets(prev => {
+      const n = [...prev];
+      const c = { ...n[i] };
+
+      c.hp = c.maxHp;
+      c.essence = c.maxEssence;
+      c.actionsLeft = 2;
+
+      // reset rasowych/klasowych zdolności
+      c.humanCharges = [false, false, false, false, false];
+      c.humanBuff = null;
+      c.elfChargeUsed = false;
+      c.dwarfPassiveArmed = false;
+      c.dwarfHibernating = false;
+      c.dwarfHibernateTurns = 0;
+      c.faeykaiChargesLeft = 3;
+      c.faeykaiMaskBroken = false;   // 🟢 reset maski Faeykai
+      c.effects = [];
+
+      n[i] = c;
+      return n;
+    });
+  }}>💤 Odpocznij</button>
+</div>
+
 {/* Pasywki rasowe */}
 <div style={{ marginTop: 8 }}>
   {set.race === "Człowiek" && (
