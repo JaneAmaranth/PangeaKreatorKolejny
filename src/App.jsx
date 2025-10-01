@@ -820,6 +820,120 @@ export default function BattleSimulator() {
                 <button onClick={() => lockSet(i)} disabled={lockedSets[i]}>✔️ Zatwierdź</button>
                 <button onClick={() => restSet(i)}>💤 Odpocznij</button>
               </div>
+{/* Pasywki rasowe */}
+<div style={{ marginTop: 8 }}>
+  {set.race === "Człowiek" && (
+    <div>
+      <div>Ludzka wytrwałość (5×/odpoczynek):</div>
+      <div style={{ display: "flex", gap: 4 }}>
+        {set.humanCharges.map((used, idx) => (
+          <div
+            key={idx}
+            onClick={()=>{
+              if (used) return;
+              const choice = prompt("Wybierz bonus: dmg/tohit/hp");
+              setSets(prev=>{
+                const n=[...prev]; const c={...n[i]};
+                c.humanCharges[idx]=true;
+                if (choice==="dmg"||choice==="tohit"||choice==="hp")
+                  c.humanBuff={ type:choice, expiresTurn: turn+1 };
+                n[i]=c; return n;
+              });
+              addLog(`👤 P${i+1} użył ludzkiej zdolności: +2 ${choice} (do końca tury).`);
+            }}
+            style={{
+              width:20, height:20,
+              background: used?"red":"green",
+              cursor:"pointer"
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  )}
+
+  {set.race === "Elf" && (
+    <div>
+      <div>Elfie naładowanie (1×/odpoczynek):</div>
+      <div
+        onClick={()=>{
+          if (set.elfChargeUsed) return;
+          setSets(prev=>{
+            const n=[...prev]; const c={...n[i]};
+            c.elfChargeUsed=true; c.elfChargedTurn=turn;
+            n[i]=c; return n;
+          });
+          addLog(`🌩️ P${i+1} (Elf) ładuje eksplozję — wybuch w następnej turze.`);
+        }}
+        style={{
+          width:20, height:20,
+          background: set.elfChargeUsed?"red":"green",
+          cursor:"pointer"
+        }}
+      />
+    </div>
+  )}
+
+  {set.race === "Krasnolud" && (
+    <div>
+      <div>Krasnoludzka hibernacja (uzbrojenie):</div>
+      <button
+        onClick={()=>{
+          if (set.dwarfPassiveArmed) return;
+          setSets(prev=>{
+            const n=[...prev]; const c={...n[i]};
+            c.dwarfPassiveArmed=true; n[i]=c; return n;
+          });
+          addLog(`⛏️ P${i+1} (Krasnolud) uzbraja hibernację.`);
+        }}
+        disabled={set.dwarfPassiveArmed}
+      >
+        {set.dwarfPassiveArmed ? "Uzbrojone" : "Uzbrój hibernację"}
+      </button>
+    </div>
+  )}
+
+  {set.race === "Faeykai" && (
+    <div>
+      <div>Faeykai (3×/odpoczynek):</div>
+      <div style={{ display: "flex", gap: 4 }}>
+        {Array.from({ length: set.faeykaiChargesLeft }, (_, idx)=>(
+          <div
+            key={idx}
+            onClick={()=>{
+              const choice = prompt("Wybierz efekt: bless/curse");
+              if (!["bless","curse"].includes(choice)) return;
+              if (choice==="bless") {
+                const target = prompt("Na którą postać (1-4)?")-1;
+                setSets(prev=>{
+                  const n=[...prev]; const trg={...n[target]};
+                  trg.effects=[...(trg.effects||[]),{ type:"bless", value:3, turnsLeft:3 }];
+                  n[target]=trg; return n;
+                });
+                addLog(`🌱 Faeykai P${i+1} błogosławi P${target+1} (+3HP/3tury).`);
+              }
+              if (choice==="curse") {
+                const enemyId = prompt("Id wroga do przeklęcia?");
+                setEnemyCurse(prev=>({...prev,[enemyId]:3}));
+                addLog(`🌑 Faeykai P${i+1} przeklina ${enemyId} (−3 toHit/3tury).`);
+              }
+              setSets(prev=>{
+                const n=[...prev]; const c={...n[i]};
+                c.faeykaiChargesLeft-=1; n[i]=c; return n;
+              });
+            }}
+            style={{
+              width:20, height:20,
+              background:"green",
+              cursor:"pointer"
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  )}
+</div>
+
 
               {/* Podnieś sojusznika */}
               <div style={{ marginTop: 8 }}>
