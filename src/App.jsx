@@ -73,43 +73,47 @@ const ENEMY_TYPES = {
 export default function BattleSimulator() {
   /* ---------- Pomoc: budowa „pustej” postaci ---------- */
   const makeChar = () => ({
-    name: "",
-    race: "Człowiek",
-    clazz: "Wojownik",
+  name: "",
+  race: "Człowiek",
+  clazz: "Wojownik",
 
-    STR: null, DEX: null, PER: null, MAG: null, CHA: null,
-    armor: 0, magicDefense: 0,
+  STR: null, DEX: null, PER: null, MAG: null, CHA: null,
+  armor: 0, magicDefense: 0,
 
-    hp: 20, maxHp: 20,
-    essence: 20, maxEssence: 20,
+  hp: 20, maxHp: 20,
+  essence: 20, maxEssence: 20,
 
-    actionsLeft: 2,
+  actionsLeft: 2,
 
-    // Rasowe
-    humanCharges: [false, false, false, false, false],
-    humanBuff: null, // { type: 'dmg'|'tohit'|'hp', expiresTurn }
-    humanPendingChoice: "dmg",
+  // Rasowe
+  humanCharges: [false, false, false, false, false],
+  humanBuff: null, // { type: 'dmg'|'tohit'|'hp', expiresTurn }
+  humanPendingChoice: "dmg",
+  humanPendingIdx: null, // <--- dodane
 
-    elfChargeUsed: false,
-    elfChargedTurn: null,
+  elfChargeUsed: false,
+  elfChargedTurn: null,
 
-    dwarfPassiveArmed: false,
-    dwarfHibernating: false,
-    dwarfHibernateTurns: 0,
+  dwarfPassiveArmed: false,
+  dwarfHibernating: false,
+  dwarfHibernateTurns: 0,
 
-    faeykaiChargesLeft: 3,
-    faeykaiMaskBroken: false,
-    faeykaiOutsideHomeland: true,
-    effects: [],
+  faeykaiChargesLeft: 3,
+  faeykaiMaskBroken: false,
+  faeykaiOutsideHomeland: true,
+  faeykaiPending: null, // <--- dodane
 
-    // Klasowe
-    classUsed: false,
-    warriorReady: false,
-    archerReady: false,
-    shooterReady: false,
-    mageReady: false,
-    mageShield: 0,
-  });
+  effects: [],
+
+  // Klasowe
+  classUsed: false,
+  warriorReady: false,
+  archerReady: false,
+  shooterReady: false,
+  mageReady: false,
+  mageShield: 0,
+});
+
 
   /* ---------- Stan: cztery postacie ---------- */
   const [sets, setSets] = useState([makeChar(), makeChar(), makeChar(), makeChar()]);
