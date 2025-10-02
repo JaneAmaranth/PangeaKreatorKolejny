@@ -496,21 +496,29 @@ const doAttack = () => {
   if (!hit) return;
 
   // obrażenia
-  const rawDie = d(w.dmgDie);
-  const mod = statMod(statVal); // 🔹 modyfikator ze statystyki przypisanej do broni
-  const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
+// obrażenia
+const rawDie = d(w.dmgDie);
+const mod = statMod(statVal);
+const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
 
-  const raw = rawDie + mod + humanDmgBonus;
-  const effArmor = effectiveEnemyArmor(chosenEnemyId);
-  const afterArmor = Math.max(0, raw - effArmor);
+// 🔹 specjalna logika dla Pięści
+let baseDamage = rawDie + mod + humanDmgBonus;
+if (weapon === "fists") {
+  baseDamage = rawDie - 2 + mod + humanDmgBonus;
+}
 
-  addLog(
-    `🗡️ Obrażenia: k${w.dmgDie}=${rawDie} + mod(${w.stat})=${mod}` +
-    (humanDmgBonus ? ` + human(+2)` : "") +
-    ` = ${raw} − Pancerz(${effArmor}) = ${afterArmor}`
-  );
+const effArmor = effectiveEnemyArmor(chosenEnemyId);
+const afterArmor = Math.max(0, baseDamage - effArmor);
 
-  damageEnemy(chosenEnemyId, afterArmor);
+addLog(
+  `🗡️ Obrażenia: k${w.dmgDie}=${rawDie}` +
+  (weapon === "fists" ? " − 2" : "") +
+  ` + mod(${w.stat})=${mod}` +
+  (humanDmgBonus ? ` + human(+2)` : "") +
+  ` = ${baseDamage} − Pancerz(${effArmor}) = ${afterArmor}`
+);
+
+damageEnemy(chosenEnemyId, afterArmor);
 
   // Łucznik debuff
   if (c.clazz === "Łucznik" && c.archerReady && weapon === "bow") {
