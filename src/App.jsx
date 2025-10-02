@@ -454,88 +454,95 @@ const useClassPower = (i) => {
 
 
   /* ===== WALKA: Atak fizyczny (GRACZ) ===== */
-  const doAttack = () => {
-    if (!lockedSets[activeSet]) return addLog("❌ Najpierw zatwierdź wybraną postać.");
-    const c = getActiveStats();
-    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji w tej turze.");
-    if (!chosenEnemyId) return addLog("❌ Wybierz cel (wroga).");
+const doAttack = () => {
+  if (!lockedSets[activeSet]) return addLog("❌ Najpierw zatwierdź wybraną postać.");
+  const c = getActiveStats();
+  if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji w tej turze.");
+  if (!chosenEnemyId) return addLog("❌ Wybierz cel (wroga).");
 
-    const w = weaponData[weapon];
-    const e = getEnemy(chosenEnemyId);
-    if (!e) return addLog("❌ Nie znaleziono wybranego wroga.");
+  const w = weaponData[weapon];
+  const e = getEnemy(chosenEnemyId);
+  if (!e) return addLog("❌ Nie znaleziono wybranego wroga.");
 
-    const statVal = Number(c[w.stat] ?? 0);
-    const humanToHitBonus = c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? 2 : 0;
+  const statVal = Number(c[w.stat] ?? 0);
+  const humanToHitBonus = c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? 2 : 0;
 
-    // Wojownik: maksymalny cios
-    if (c.clazz === "Wojownik" && c.warriorReady && w.type === "physical") {
-      const maxDmg = w.dmgDie;
-      addLog(`💥 Wojownik (maksymalny cios): auto-trafienie, brak obrony/pancerza. Obrażenia = k${w.dmgDie} max (${maxDmg}).`);
-      spendAction(activeSet);
-      setSets((prev) => {
-        const next = [...prev];
-        next[activeSet] = { ...next[activeSet], warriorReady: false };
-        return next;
-      });
-      damageEnemy(chosenEnemyId, maxDmg);
-      return;
-    }
-
-    const effDefense = effectiveEnemyDefense(chosenEnemyId);
-    const roll20 = d(20);
-    const toHit = roll20 + statVal + humanToHitBonus;
-    const hit = toHit >= effDefense;
-
-    addLog(
-      `⚔️ Atak (${w.name}) — k20=${roll20} + ${w.stat}(${statVal})` +
-      (humanToHitBonus ? ` + human(+2)` : "") +
-      ` = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`
-    );
-
+  // Wojownik: maksymalny cios
+  if (c.clazz === "Wojownik" && c.warriorReady && w.type === "physical") {
+    const maxDmg = w.dmgDie;
+    addLog(`💥 Wojownik (maksymalny cios): auto-trafienie, brak obrony/pancerza. Obrażenia = k${w.dmgDie} max (${maxDmg}).`);
     spendAction(activeSet);
-    if (!hit) return;
+    setSets((prev) => {
+      const next = [...prev];
+      next[activeSet] = { ...next[activeSet], warriorReady: false };
+      return next;
+    });
+    damageEnemy(chosenEnemyId, maxDmg);
+    return;
+  }
 
-// obrażenia
-const rawDie = d(w.dmgDie);
-const mod = statMod(statVal); // 🔹 modyfikator ze statystyki przypisanej do broni
-const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
+  const effDefense = effectiveEnemyDefense(chosenEnemyId);
+  const roll20 = d(20);
+  const toHit = roll20 + statVal + humanToHitBonus;
+  const hit = toHit >= effDefense;
 
-const raw = rawDie + mod + humanDmgBonus;
-const effArmor = effectiveEnemyArmor(chosenEnemyId);
-const afterArmor = Math.max(0, raw - effArmor);
+  addLog(
+    `⚔️ Atak (${w.name}) — k20=${roll20} + ${w.stat}(${statVal})` +
+    (humanToHitBonus ? ` + human(+2)` : "") +
+    ` = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`
+  );
 
-addLog(
-  `🗡️ Obrażenia: k${w.dmgDie}=${rawDie} + mod(${w.stat})=${mod}` +
-  (humanDmgBonus ? ` + human(+2)` : "") +
-  ` = ${raw} − Pancerz(${effArmor}) = ${afterArmor}`
-);
+  spendAction(activeSet);
+  if (!hit) return;
 
-damageEnemy(chosenEnemyId, afterArmor);
+  // obrażenia
+  const rawDie = d(w.dmgDie);
+  const mod = statMod(statVal); // 🔹 modyfikator ze statystyki przypisanej do broni
+  const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
 
-    // Łucznik debuff
-    if (c.clazz === "Łucznik" && c.archerReady && weapon === "bow") {
-      setEnemies(prev => prev.map(en => en.id === chosenEnemyId ? { ...en, defenseDebuff: { value: 5, turns: 3 } } : en));
-      setSets(prev => {
-        const next = [...prev];
-        next[activeSet] = { ...next[activeSet], archerReady: false };
-        return next;
-      });
-      addLog(`🏹 Debuff: Obrona celu −5 na 3 tury.`);
-    }
+  const raw = rawDie + mod + humanDmgBonus;
+  const effArmor = effectiveEnemyArmor(chosenEnemyId);
+  const afterArmor = Math.max(0, raw - effArmor);
 
-    // Strzelec debuff
-    if (c.clazz === "Strzelec" && c.shooterReady && weapon === "musket") {
-      setEnemies(prev => prev.map(en => en.id === chosenEnemyId ? { ...en, armorDebuff: { factor: 0.5, turns: 3 } } : en));
-      setSets(prev => {
-        const next = [...prev];
-        next[activeSet] = { ...next[activeSet], shooterReady: false };
-        return next;
-      });
-      addLog(`🔧 Debuff: Pancerz celu ×0.5 na 3 tury.`);
-    }
+  addLog(
+    `🗡️ Obrażenia: k${w.dmgDie}=${rawDie} + mod(${w.stat})=${mod}` +
+    (humanDmgBonus ? ` + human(+2)` : "") +
+    ` = ${raw} − Pancerz(${effArmor}) = ${afterArmor}`
+  );
 
-    damageEnemy(chosenEnemyId, afterArmor);
-  };
+  damageEnemy(chosenEnemyId, afterArmor);
+
+  // Łucznik debuff
+  if (c.clazz === "Łucznik" && c.archerReady && weapon === "bow") {
+    setEnemies(prev => prev.map(en =>
+      en.id === chosenEnemyId
+        ? { ...en, defenseDebuff: { value: 5, turns: 3 } }
+        : en
+    ));
+    setSets(prev => {
+      const next = [...prev];
+      next[activeSet] = { ...next[activeSet], archerReady: false };
+      return next;
+    });
+    addLog(`🏹 Debuff: Obrona celu −5 na 3 tury.`);
+  }
+
+  // Strzelec debuff
+  if (c.clazz === "Strzelec" && c.shooterReady && weapon === "musket") {
+    setEnemies(prev => prev.map(en =>
+      en.id === chosenEnemyId
+        ? { ...en, armorDebuff: { factor: 0.5, turns: 3 } }
+        : en
+    ));
+    setSets(prev => {
+      const next = [...prev];
+      next[activeSet] = { ...next[activeSet], shooterReady: false };
+      return next;
+    });
+    addLog(`🔧 Debuff: Pancerz celu ×0.5 na 3 tury.`);
+  }
+};
+
 
   /* ===== ZAKLĘCIA (GRACZ) ===== */
   const castSelectedSpell = () => {
