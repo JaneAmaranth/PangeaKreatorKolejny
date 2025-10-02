@@ -66,10 +66,11 @@ function makeEnemyInstance(type, index) {
 
     // efekty per instancja
     stun: 0,
-    curse: 0, // +3 do progu trafienia (utrudnienie ataku tego wroga)
-    defenseDebuff: { value: 0, turns: 0 }, // -X do Obrony przez N tur
-    armorDebuff: { factor: 1, turns: 0 },  // ×factor do pancerza przez N tur
-    forcedTarget: null, // jednorazowe wymuszenie celu ataku (Dyplomata)
+    curse: 0,
+    blind: 0, // 🔹 nowe — -5 do trafienia
+    defenseDebuff: { value: 0, turns: 0 },
+    armorDebuff: { factor: 1, turns: 0 },
+    forcedTarget: null,
   };
 }
 
@@ -534,88 +535,107 @@ const useClassPower = (i) => {
 
   /* ===== ZAKLĘCIA (GRACZ) ===== */
   const castSelectedSpell = () => {
-    if (!lockedSets[activeSet]) return addLog("❌ Najpierw zatwierdź wybraną postać.");
-    const c = getActiveStats();
-    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji w tej turze.");
+  if (!lockedSets[activeSet]) return addLog("❌ Najpierw zatwierdź wybraną postać.");
+  const c = getActiveStats();
+  if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji w tej turze.");
 
-    const spell = SPELLS[selectedSpellName];
-    if (!spell) return;
+  const spell = SPELLS[selectedSpellName];
+  if (!spell) return;
 
-    if (spell.type !== "heal" && !chosenEnemyId) return addLog("❌ Wybierz cel (wroga).");
+  if (spell.type !== "heal" && !chosenEnemyId) return addLog("❌ Wybierz cel (wroga).");
 
-    if (c.essence < spell.cost) return addLog(`❌ Esencja: ${c.essence} < koszt ${spell.cost}.`);
+  if (c.essence < spell.cost) return addLog(`❌ Esencja: ${c.essence} < koszt ${spell.cost}.`);
 
-    const MAG = Number(c.MAG ?? 0);
-    const faeykaiPenalty = c.race === "Faeykai" && c.faeykaiOutsideHomeland && c.faeykaiMaskBroken ? 5 : 0;
+  const MAG = Number(c.MAG ?? 0);
+  const faeykaiPenalty = c.race === "Faeykai" && c.faeykaiOutsideHomeland && c.faeykaiMaskBroken ? 5 : 0;
 
-    let lines = [`✨ „${selectedSpellName}” — koszt ${spell.cost} (Esencja przed: ${c.essence})`];
-    setActiveEssence(c.essence - spell.cost);
-    spendAction(activeSet);
+  let lines = [`✨ „${selectedSpellName}” — koszt ${spell.cost} (Esencja przed: ${c.essence})`];
+  setActiveEssence(c.essence - spell.cost);
+  spendAction(activeSet);
 
-    if (spell.type === "damage") {
-      const e = getEnemy(chosenEnemyId);
-      if (!e) return addLog("❌ Nie znaleziono celu.");
+  // ===== CZARY ATAKUJĄCE =====
+  if (spell.type === "damage") {
+    const e = getEnemy(chosenEnemyId);
+    if (!e) return addLog("❌ Nie znaleziono celu.");
 
-      const roll20 = d(20);
-      const effDefense = effectiveEnemyDefense(chosenEnemyId);
-      const toHit = roll20 + MAG - faeykaiPenalty + (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? 2 : 0);
-      const hit = toHit >= effDefense;
-      lines.push(
-        `🎯 Trafienie: k20=${roll20} + MAG(${MAG})` +
-        (faeykaiPenalty ? ` − Faeykai(−5)` : "") +
-        (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? ` + human(+2)` : "") +
-        ` = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`
-      );
-      if (!hit) return addLog(lines.join("\n"));
+    const roll20 = d(20);
+    const effDefense = effectiveEnemyDefense(chosenEnemyId);
+    const toHit = roll20 + MAG - faeykaiPenalty + (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? 2 : 0);
+    const hit = toHit >= effDefense;
 
-      const rollDmg = d(spell.dmgDie);
-      const mod = statMod(MAG);
-      const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
-      const raw = rollDmg + mod + humanDmgBonus;
-      const reduced = Math.max(0, raw - Number(e.magicDefense));
-      lines.push(
-        `💥 Obrażenia: k${spell.dmgDie}=${rollDmg} + mod(MAG)=${mod}` +
-        (humanDmgBonus ? ` + human(+2)` : "") +
-        ` = ${raw}`
-      );
-      lines.push(`🛡️ Redukcja magią (cel): −${e.magicDefense} → ${reduced}`);
-      addLog(lines.join("\n"));
+    lines.push(
+      `🎯 Trafienie: k20=${roll20} + MAG(${MAG})` +
+      (faeykaiPenalty ? ` − Faeykai(−5)` : "") +
+      (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? ` + human(+2)` : "") +
+      ` = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`
+    );
+    if (!hit) return addLog(lines.join("\n"));
 
-      // Mag: tarcza po czarze
-      if (c.clazz === "Mag" && c.mageReady && reduced > 0) {
-        const shield = Math.floor(reduced * 0.5);
-        setSets((prev) => {
-          const next = [...prev];
-          next[activeSet] = { ...next[activeSet], mageReady: false, mageShield: shield };
-          return next;
-        });
-        addLog(`🛡️ Tarcza Maga aktywna: ${shield}.`);
-      }
+    const rollDmg = d(spell.dmgDie);
+    const mod = statMod(MAG);
+    const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
+    const raw = rollDmg + mod + humanDmgBonus;
+    const reduced = Math.max(0, raw - Number(e.magicDefense));
+    lines.push(
+      `💥 Obrażenia: k${spell.dmgDie}=${rollDmg} + mod(MAG)=${mod}` +
+      (humanDmgBonus ? ` + human(+2)` : "") +
+      ` = ${raw}`
+    );
+    lines.push(`🛡️ Redukcja magią (cel): −${e.magicDefense} → ${reduced}`);
+    addLog(lines.join("\n"));
 
-      damageEnemy(chosenEnemyId, reduced);
-      return;
-    }
-
-    if (spell.type === "heal") {
-      const rollHeal = d(spell.healDie);
+    // Mag: tarcza po czarze
+    if (c.clazz === "Mag" && c.mageReady && reduced > 0) {
+      const shield = Math.floor(reduced * 0.5);
       setSets((prev) => {
         const next = [...prev];
-        const target = { ...next[healTarget] };
-        target.hp = Math.min(target.maxHp ?? 20, (target.hp ?? 0) + rollHeal);
-        next[healTarget] = target;
+        next[activeSet] = { ...next[activeSet], mageReady: false, mageShield: shield };
         return next;
       });
-      lines.push(
-        `💚 Leczenie: k${spell.healDie}=${rollHeal} → ` +
-        `${sets[activeSet].name || `Postać ${activeSet + 1}`} leczy ` +
-        `${sets[healTarget].name || `Postać ${healTarget + 1}`} o +${rollHeal} HP`
-      );
-      addLog(lines.join("\n"));
-      return;
+      addLog(`🛡️ Tarcza Maga aktywna: ${shield}.`);
     }
 
-    addLog(lines.concat("🌑 Efekt zaklęcia zastosowany.").join("\n"));
-  };
+    damageEnemy(chosenEnemyId, reduced);
+    return;
+  }
+
+  // ===== CZARY LECZĄCE =====
+  if (spell.type === "heal") {
+    const rollHeal = d(spell.healDie);
+    setSets((prev) => {
+      const next = [...prev];
+      const target = { ...next[healTarget] };
+      target.hp = Math.min(target.maxHp ?? 20, (target.hp ?? 0) + rollHeal);
+      next[healTarget] = target;
+      return next;
+    });
+    lines.push(
+      `💚 Leczenie: k${spell.healDie}=${rollHeal} → ` +
+      `${sets[activeSet].name || `Postać ${activeSet + 1}`} leczy ` +
+      `${sets[healTarget].name || `Postać ${healTarget + 1}`} o +${rollHeal} HP`
+    );
+    addLog(lines.join("\n"));
+    return;
+  }
+
+  // ===== CZARY EFEKTOWE =====
+  if (spell.type === "effect") {
+    if (!chosenEnemyId) return addLog("❌ Wybierz cel (wroga).");
+
+    if (selectedSpellName === "Oślepienie") {
+      setEnemies(prev => prev.map(e => 
+        e.id === chosenEnemyId 
+          ? { ...e, blind: 2 } // 🔹 efekt trwa 2 tury
+          : e
+      ));
+      addLog(`🌑 ${c.name || `Postać ${activeSet+1}`} rzuca „Oślepienie” → ${getEnemy(chosenEnemyId)?.name} ma −5 do trafienia (2 tury).`);
+    } else {
+      addLog(lines.concat("🌑 Efekt zaklęcia zastosowany.").join("\n"));
+    }
+    return;
+  }
+};
+
 
   /* ===== ATAK WROGA (broń) ===== */
 const enemyAttack = (enemyId, targetIndex, weaponKey) => {
@@ -623,7 +643,7 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
   if (!e) return addLog("❌ Nie znaleziono wroga.");
   if (e.actionsLeft <= 0) return addLog(`❌ ${e.name} nie ma akcji.`);
 
-  // 🔹 sprawdzamy, czy Dyplomata zmusił go do ataku
+  // 🔹 sprawdzamy, czy wróg ma wymuszony atak (Dyplomata)
   if (e.forcedTarget) {
     if (e.forcedTarget.type === "enemy") {
       const victim = getEnemy(e.forcedTarget.value);
@@ -649,8 +669,7 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
     }
   }
 
-  // 🔹 standardowy atak na gracza (jak wcześniej)
-  const overriddenTarget = targetIndex;
+  // 🔹 standardowy atak na gracza
   if (e.stun > 0) {
     addLog(`🌀 ${e.name} jest ogłuszony (pozostało ${e.stun} tur).`);
     return;
@@ -658,37 +677,45 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
 
   const w = weaponData[weaponKey];
   const roll20 = d(20);
-  const needDelta = (e.curse > 0 ? 3 : 0);
-  const toHit = roll20 + e.toHit - needDelta;
 
-  const target = sets[overriddenTarget];
+  const needDelta = e.curse > 0 ? 3 : 0;      // kara za przekleństwo
+  const blindPenalty = e.blind > 0 ? 5 : 0;   // 🔹 kara za oślepienie
+
+  const toHit = roll20 + e.toHit - needDelta - blindPenalty;
+
+  const target = sets[targetIndex];
   if (!target) return addLog("❌ Brak celu (postać).");
 
+  // uproszczona obrona postaci: 10 + DEX
   const defenseThreshold = 10 + (Number(target.DEX ?? 0));
   const hit = toHit >= defenseThreshold;
 
   addLog(
     `👹 ${e.name} atakuje (${w.name}) → k20=${roll20} + toHit(${e.toHit})` +
     (needDelta ? ` − przeklęstwo(${needDelta})` : "") +
+    (blindPenalty ? ` − oślepienie(${blindPenalty})` : "") + // 🔹 nowy wpis w logu
     ` = ${toHit} vs próg ${defenseThreshold} → ${hit ? "✅" : "❌"}`
   );
 
   setEnemies(prev => prev.map(x => x.id === e.id ? { ...x, actionsLeft: x.actionsLeft - 1, forcedTarget: null } : x));
   if (!hit) return;
 
+  // obrażenia fizyczne
   let incoming = d(w.dmgDie);
   addLog(`💥 Rzut obrażeń: k${w.dmgDie}=${incoming}`);
 
+  // Krasnolud w hibernacji ignoruje obrażenia
   if (target.dwarfHibernating) {
-    addLog(`🛌 Postać ${overriddenTarget + 1} hibernuje — obrażenia zignorowane.`);
+    addLog(`🛌 Postać ${targetIndex + 1} hibernuje — obrażenia zignorowane.`);
     return;
   }
 
   incoming = Math.max(0, incoming - Number(target.armor || 0));
   let reflected = 0;
 
+  // tarcza Maga
   setSets(prev => prev.map((c, i) => {
-    if (i !== overriddenTarget) return c;
+    if (i !== targetIndex) return c;
     let useShield = 0;
     if ((c.mageShield || 0) > 0 && incoming > 0) {
       useShield = Math.min(c.mageShield, incoming);
@@ -697,14 +724,19 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
     }
     const before = c.hp;
     let hp = Math.max(0, before - incoming);
+
+    // Faeykai maska
     if (c.race === "Faeykai") {
       const thresh = Math.ceil((c.maxHp || 20) * 0.1);
       if (hp < thresh) c.faeykaiMaskBroken = true;
     }
+
+    // Krasnolud: jeśli uzbrojony i spada do 0 → hibernacja
     if (c.race === "Krasnolud" && c.dwarfPassiveArmed && before > 0 && hp <= 0) {
       hp = 0;
       return { ...c, hp, dwarfHibernating: true, dwarfHibernateTurns: 2, mageShield: Math.max(0, (c.mageShield||0) - useShield) };
     }
+
     return { ...c, hp, mageShield: Math.max(0, (c.mageShield||0) - useShield) };
   }));
 
@@ -712,8 +744,10 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
     damageEnemy(e.id, reflected);
     addLog(`🔮 Tarcza Maga odbija ${reflected} do ${e.name}.`);
   }
-  if (incoming > 0) addLog(`❤️ Postać ${overriddenTarget + 1} otrzymuje ${incoming} obrażeń po pancerzu.`);
+
+  if (incoming > 0) addLog(`❤️ Postać ${targetIndex + 1} otrzymuje ${incoming} obrażeń po pancerzu.`);
 };
+
 
 
   /* ===== ZAKLĘCIA WROGÓW =====
@@ -840,86 +874,103 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
   };
 
   /* ===== TURY ===== */
-  const nextTurn = () => {
-    // Postacie
-    setSets((prev) => {
-      const next = prev.map((c, idx) => {
-        const me = { ...c };
+const nextTurn = () => {
+  // Postacie
+  setSets((prev) => {
+    const next = prev.map((c, idx) => {
+      const me = { ...c };
 
-        // odśwież akcje
-        me.actionsLeft = 2;
+      // odśwież akcje
+      me.actionsLeft = 2;
 
-        // Człowiek — buff wygasa
-        if (me.humanBuff && me.humanBuff.expiresTurn < turn + 1) {
-          me.humanBuff = null;
-        }
+      // Człowiek — buff wygasa
+      if (me.humanBuff && me.humanBuff.expiresTurn < turn + 1) {
+        me.humanBuff = null;
+      }
 
-        // Elf: eksplozja jeśli ładował turę temu
-        if (me.race === "Elf" && me.elfChargeUsed && me.elfChargedTurn === turn) {
-          const before = me.hp || 0;
-          me.hp = Math.max(0, before - 5);
-          addLog(`🌩️ Elf (Postać ${idx + 1}) — eksplozja: −5 HP dla elfa, wszyscy wrogowie −10 HP + ogłuszenie 1 turę.`);
+      // Elf: eksplozja jeśli ładował turę temu
+      if (me.race === "Elf" && me.elfChargeUsed && me.elfChargedTurn === turn) {
+        const before = me.hp || 0;
+        me.hp = Math.max(0, before - 5);
+        addLog(`🌩️ Elf (Postać ${idx + 1}) — eksplozja: −5 HP dla elfa, wszyscy wrogowie −10 HP + ogłuszenie 1 turę.`);
 
-          setEnemies((prevEnemies) => prevEnemies.map(en => ({ ...en, hp: Math.max(0, en.hp - 10), stun: Math.max(en.stun, 1) })));
+        setEnemies((prevEnemies) => prevEnemies.map(en => ({
+          ...en,
+          hp: Math.max(0, en.hp - 10),
+          stun: Math.max(en.stun, 1)
+        })));
 
-          me.elfChargeUsed = false;
-          me.elfChargedTurn = null;
-        }
+        me.elfChargeUsed = false;
+        me.elfChargedTurn = null;
+      }
 
-        // Regeneracje/błogosławieństwa
-        if (me.effects && me.effects.length) {
-          me.effects = me.effects
-            .map((ef) => {
-              if (ef.type === "bless" && ef.turnsLeft > 0) {
-                me.hp = Math.min(me.maxHp ?? 20, (me.hp ?? 0) + (ef.value || 0));
-                return { ...ef, turnsLeft: ef.turnsLeft - 1 };
-              }
-              if (ef.type === "buffHit" && ef.turnsLeft > 0) {
-                return { ...ef, turnsLeft: ef.turnsLeft - 1 };
-              }
+      // Regeneracje/błogosławieństwa
+      if (me.effects && me.effects.length) {
+        me.effects = me.effects
+          .map((ef) => {
+            if (ef.type === "bless" && ef.turnsLeft > 0) {
+              me.hp = Math.min(me.maxHp ?? 20, (me.hp ?? 0) + (ef.value || 0));
               return { ...ef, turnsLeft: ef.turnsLeft - 1 };
-            })
-            .filter((ef) => ef.turnsLeft > 0);
+            }
+            if (ef.type === "buffHit" && ef.turnsLeft > 0) {
+              return { ...ef, turnsLeft: ef.turnsLeft - 1 };
+            }
+            return { ...ef, turnsLeft: ef.turnsLeft - 1 };
+          })
+          .filter((ef) => ef.turnsLeft > 0);
+      }
+
+      // Krasnolud: hibernacja tic
+      if (me.dwarfHibernating) {
+        me.dwarfHibernateTurns = Math.max(0, (me.dwarfHibernateTurns || 0) - 1);
+        if (me.dwarfHibernateTurns === 0) {
+          me.dwarfHibernating = false;
+          addLog(`⛏️ Krasnolud (Postać ${idx + 1}) kończy hibernację.`);
         }
+      }
 
-        // Krasnolud: hibernacja tic
-        if (me.dwarfHibernating) {
-          me.dwarfHibernateTurns = Math.max(0, (me.dwarfHibernateTurns || 0) - 1);
-          if (me.dwarfHibernateTurns === 0) {
-            me.dwarfHibernating = false;
-            addLog(`⛏️ Krasnolud (Postać ${idx + 1}) kończy hibernację.`);
-          }
-        }
+      // Faeykai maska
+      if (me.race === "Faeykai") {
+        const thresh = Math.ceil((me.maxHp || 20) * 0.1);
+        if ((me.hp || 0) < thresh) me.faeykaiMaskBroken = true;
+      }
 
-        // Faeykai maska
-        if (me.race === "Faeykai") {
-          const thresh = Math.ceil((me.maxHp || 20) * 0.1);
-          if ((me.hp || 0) < thresh) me.faeykaiMaskBroken = true;
-        }
-
-        return me;
-      });
-
-      return next;
+      return me;
     });
 
-    // Wrogowie — odśwież akcje, obniż timery
-    setEnemies(prev => prev.map(e => {
-      const defDeb = e.defenseDebuff?.turns > 0 ? { value: e.defenseDebuff.value, turns: e.defenseDebuff.turns - 1 } : { value: 0, turns: 0 };
-      const armDeb = e.armorDebuff?.turns > 0 ? { factor: e.armorDebuff.factor, turns: e.armorDebuff.turns - 1 } : { factor: 1, turns: 0 };
-      return {
-        ...e,
-        actionsLeft: 2,
-        stun: Math.max(0, e.stun - 1),
-        curse: Math.max(0, e.curse - 1),
-        defenseDebuff: defDeb,
-        armorDebuff: armDeb,
-      };
-    }));
+    return next;
+  });
 
-    setTurn((t) => t + 1);
-    addLog(`⏱️ Rozpoczyna się tura ${turn + 1}.`);
-  };
+  // Wrogowie — odśwież akcje, obniż timery
+  setEnemies(prev => prev.map(e => {
+    const defDeb = e.defenseDebuff?.turns > 0
+      ? { value: e.defenseDebuff.value, turns: e.defenseDebuff.turns - 1 }
+      : { value: 0, turns: 0 };
+    const armDeb = e.armorDebuff?.turns > 0
+      ? { factor: e.armorDebuff.factor, turns: e.armorDebuff.turns - 1 }
+      : { factor: 1, turns: 0 };
+
+    const nextEnemy = {
+      ...e,
+      actionsLeft: 2,
+      stun: Math.max(0, e.stun - 1),
+      curse: Math.max(0, e.curse - 1),
+      blind: Math.max(0, (e.blind || 0) - 1), // 🔹 oślepienie zmniejsza się co turę
+      defenseDebuff: defDeb,
+      armorDebuff: armDeb,
+    };
+
+    // 🔹 logowanie statusu oślepienia
+    if (nextEnemy.blind > 0) {
+      addLog(`👁️ ${nextEnemy.name} jest oślepiony (−5 do trafienia, ${nextEnemy.blind} tury pozostało).`);
+    }
+
+    return nextEnemy;
+  }));
+
+  setTurn((t) => t + 1);
+  addLog(`⏱️ Rozpoczyna się tura ${turn + 1}.`);
+};
 
   /* ===== UI ===== */
   return (
