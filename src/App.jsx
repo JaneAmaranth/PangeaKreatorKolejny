@@ -1489,7 +1489,7 @@ const nextTurn = () => {
       </div>
 
       {/* Log */}
-      <div style={{ marginTop: 16, background: "#111", color: "#eee", padding: 10, borderRadius: 8, maxHeight: 260, overflow: "auto", fontSize: 13 }}>
+           <div style={{ marginTop: 16, background: "#111", color: "#eee", padding: 10, borderRadius: 8, maxHeight: 260, overflow: "auto", fontSize: 13 }}>
         {log.map((line, i) => <div key={i}>{line}</div>)}
       </div>
     </div>
