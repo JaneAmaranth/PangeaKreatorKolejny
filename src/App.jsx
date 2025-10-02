@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 
 /* ===== Pomocnicze ===== */
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
