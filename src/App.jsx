@@ -1486,8 +1486,6 @@ const nextTurn = () => {
             <div>Wymuszenia Dyplomaty per wróg ustawisz w sekcji „Wrogowie” (Domyślnie trafia aktywną postać).</div>
           </div>
         </div>
-      </div>
-
       {/* Log */}
            <div style={{ marginTop: 16, background: "#111", color: "#eee", padding: 10, borderRadius: 8, maxHeight: 260, overflow: "auto", fontSize: 13 }}>
         {log.map((line, i) => <div key={i}>{line}</div>)}
