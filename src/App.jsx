@@ -137,7 +137,13 @@ export default function BattleSimulator() {
   // Revive dropdown per postać
   const [reviveTargetIndex, setReviveTargetIndex] = useState([null, null, null, null]);
 
-  const [turn, setTurn] = useState(1);
+// NOWE: Cele AOE do Wybuchu energii
+const [aoeTargets, setAoeTargets] = useState({ chars: [], enemies: [] });
+
+  const [enemyAoeTargets, setEnemyAoeTargets] = useState({});
+
+
+const [turn, setTurn] = useState(1);
 
   const [log, setLog] = useState([]);
   const addLog = (line) => {
@@ -545,7 +551,7 @@ const doAttack = () => {
 
 
   /* ===== ZAKLĘCIA (GRACZ) ===== */
-  const castSelectedSpell = () => {
+const castSelectedSpell = () => {
   if (!lockedSets[activeSet]) return addLog("❌ Najpierw zatwierdź wybraną postać.");
   const c = getActiveStats();
   if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji w tej turze.");
@@ -553,32 +559,75 @@ const doAttack = () => {
   const spell = SPELLS[selectedSpellName];
   if (!spell) return;
 
-  if (spell.type !== "heal" && !chosenEnemyId) return addLog("❌ Wybierz cel (wroga).");
+  if (spell.type !== "heal" && !chosenEnemyId && selectedSpellName !== "Wybuch energii")
+    return addLog("❌ Wybierz cel (wroga).");
 
-  if (c.essence < spell.cost) return addLog(`❌ Esencja: ${c.essence} < koszt ${spell.cost}.`);
+  if (c.essence < spell.cost)
+    return addLog(`❌ Esencja: ${c.essence} < koszt ${spell.cost}.`);
 
   const MAG = Number(c.MAG ?? 0);
-  const faeykaiPenalty = c.race === "Faeykai" && c.faeykaiOutsideHomeland && c.faeykaiMaskBroken ? 5 : 0;
+  const faeykaiPenalty =
+    c.race === "Faeykai" && c.faeykaiOutsideHomeland && c.faeykaiMaskBroken ? 5 : 0;
 
   let lines = [`✨ „${selectedSpellName}” — koszt ${spell.cost} (Esencja przed: ${c.essence})`];
   setActiveEssence(c.essence - spell.cost);
   spendAction(activeSet);
 
-  // ===== CZARY ATAKUJĄCE =====
+  // ===== AOE: Wybuch energii =====
+  if (selectedSpellName === "Wybuch energii") {
+    const rollDmg = d(spell.dmgDie);
+    const mod = statMod(MAG);
+    const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
+    const raw = rollDmg + mod + humanDmgBonus;
+
+    lines.push(`💥 Wybuch energii: k${spell.dmgDie}=${rollDmg} + mod(MAG)=${mod}${humanDmgBonus ? " + human(+2)" : ""} = ${raw}`);
+
+    // Postacie
+    aoeTargets.chars.forEach(idx => {
+      setSets(prev => {
+        const next = [...prev];
+        const target = { ...next[idx] };
+        const reduced = Math.max(0, raw - Number(target.magicDefense));
+        target.hp = Math.max(0, (target.hp || 0) - reduced);
+        next[idx] = target;
+        return next;
+      });
+      lines.push(`❤️ Postać ${idx+1} otrzymuje ${raw} − Obr.magią = ${Math.max(0, raw - sets[idx].magicDefense)} dmg`);
+    });
+
+    // Wrogowie
+    aoeTargets.enemies.forEach(id => {
+      setEnemies(prev => prev.map(e => {
+        if (e.id !== id) return e;
+        const reduced = Math.max(0, raw - e.magicDefense);
+        lines.push(`👹 ${e.name} otrzymuje ${raw} − Obr.magią(${e.magicDefense}) = ${reduced} dmg`);
+        return { ...e, hp: Math.max(0, e.hp - reduced) };
+      }));
+    });
+
+    addLog(lines.join("\n"));
+    return;
+  }
+
+  // ===== POZOSTAŁE CZARY ATAKUJĄCE =====
   if (spell.type === "damage") {
     const e = getEnemy(chosenEnemyId);
     if (!e) return addLog("❌ Nie znaleziono celu.");
 
     const roll20 = d(20);
     const effDefense = effectiveEnemyDefense(chosenEnemyId);
-    const toHit = roll20 + MAG - faeykaiPenalty + (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? 2 : 0);
+    const toHit =
+      roll20 +
+      MAG -
+      faeykaiPenalty +
+      (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? 2 : 0);
     const hit = toHit >= effDefense;
 
     lines.push(
       `🎯 Trafienie: k20=${roll20} + MAG(${MAG})` +
-      (faeykaiPenalty ? ` − Faeykai(−5)` : "") +
-      (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? ` + human(+2)` : "") +
-      ` = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`
+        (faeykaiPenalty ? ` − Faeykai(−5)` : "") +
+        (c.race === "Człowiek" && c.humanBuff?.type === "tohit" ? ` + human(+2)` : "") +
+        ` = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`
     );
     if (!hit) return addLog(lines.join("\n"));
 
@@ -589,8 +638,8 @@ const doAttack = () => {
     const reduced = Math.max(0, raw - Number(e.magicDefense));
     lines.push(
       `💥 Obrażenia: k${spell.dmgDie}=${rollDmg} + mod(MAG)=${mod}` +
-      (humanDmgBonus ? ` + human(+2)` : "") +
-      ` = ${raw}`
+        (humanDmgBonus ? ` + human(+2)` : "") +
+        ` = ${raw}`
     );
     lines.push(`🛡️ Redukcja magią (cel): −${e.magicDefense} → ${reduced}`);
     addLog(lines.join("\n"));
@@ -598,7 +647,7 @@ const doAttack = () => {
     // Mag: tarcza po czarze
     if (c.clazz === "Mag" && c.mageReady && reduced > 0) {
       const shield = Math.floor(reduced * 0.5);
-      setSets((prev) => {
+      setSets(prev => {
         const next = [...prev];
         next[activeSet] = { ...next[activeSet], mageReady: false, mageShield: shield };
         return next;
@@ -610,10 +659,10 @@ const doAttack = () => {
     return;
   }
 
-  // ===== CZARY LECZĄCE =====
+  // ===== LECZENIE =====
   if (spell.type === "heal") {
     const rollHeal = d(spell.healDie);
-    setSets((prev) => {
+    setSets(prev => {
       const next = [...prev];
       const target = { ...next[healTarget] };
       target.hp = Math.min(target.maxHp ?? 20, (target.hp ?? 0) + rollHeal);
@@ -622,24 +671,24 @@ const doAttack = () => {
     });
     lines.push(
       `💚 Leczenie: k${spell.healDie}=${rollHeal} → ` +
-      `${sets[activeSet].name || `Postać ${activeSet + 1}`} leczy ` +
-      `${sets[healTarget].name || `Postać ${healTarget + 1}`} o +${rollHeal} HP`
+        `${sets[activeSet].name || `Postać ${activeSet + 1}`} leczy ` +
+        `${sets[healTarget].name || `Postać ${healTarget + 1}`} o +${rollHeal} HP`
     );
     addLog(lines.join("\n"));
     return;
   }
 
-  // ===== CZARY EFEKTOWE =====
+  // ===== EFEKT (np. Oślepienie) =====
   if (spell.type === "effect") {
     if (!chosenEnemyId) return addLog("❌ Wybierz cel (wroga).");
 
     if (selectedSpellName === "Oślepienie") {
-      setEnemies(prev => prev.map(e => 
-        e.id === chosenEnemyId 
-          ? { ...e, blind: 2 } // 🔹 efekt trwa 2 tury
-          : e
-      ));
-      addLog(`🌑 ${c.name || `Postać ${activeSet+1}`} rzuca „Oślepienie” → ${getEnemy(chosenEnemyId)?.name} ma −5 do trafienia (2 tury).`);
+      setEnemies(prev =>
+        prev.map(e => (e.id === chosenEnemyId ? { ...e, blind: 2 } : e))
+      );
+      addLog(
+        `🌑 ${c.name || `Postać ${activeSet+1}`} rzuca „Oślepienie” → ${getEnemy(chosenEnemyId)?.name} ma −5 do trafienia (2 tury).`
+      );
     } else {
       addLog(lines.concat("🌑 Efekt zaklęcia zastosowany.").join("\n"));
     }
@@ -765,92 +814,120 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
      - Wszystkie to ataki magiczne (redukcja Obr.magią celu)
      - Koszty / działanie wg specyfikacji
   */
-  const enemyCastSpell = (enemyId, spellName, targetIndexes) => {
-    const e = getEnemy(enemyId);
-    if (!e) return;
-    if (e.actionsLeft <= 0) return addLog(`❌ ${e.name} brak akcji.`);
-    if (e.stun > 0) {
-      addLog(`🌀 ${e.name} jest ogłuszony i nie może czarować (pozostało ${e.stun} tur).`);
-      return;
-    }
+const enemyCastSpell = (enemyId, spellName, targetIndexes) => {
+  const e = getEnemy(enemyId);
+  if (!e) return;
+  if (e.actionsLeft <= 0) return addLog(`❌ ${e.name} brak akcji.`);
+  if (e.stun > 0) {
+    addLog(`🌀 ${e.name} jest ogłuszony i nie może czarować (pozostało ${e.stun} tur).`);
+    return;
+  }
 
-    // koszty wg specyfikacji
-    const costs = {
-      "Mroczny Pakt": 2,
-      "Wyssanie życia": 5,
-      "Magiczny pocisk": 3,
-      "Wybuch energii": 5,
-    };
-    const cost = costs[spellName] || 0;
-    if (e.essence < cost) return addLog(`❌ ${e.name} nie ma esencji (${e.essence}/${cost}).`);
+  // koszty wg specyfikacji
+  const costs = {
+    "Mroczny Pakt": 2,
+    "Wyssanie życia": 5,
+    "Magiczny pocisk": 3,
+    "Wybuch energii": 5,
+  };
+  const cost = costs[spellName] || 0;
+  if (e.essence < cost) return addLog(`❌ ${e.name} nie ma esencji (${e.essence}/${cost}).`);
 
-    // zużyj akcję i esencję
-    setEnemies(prev => prev.map(x => x.id === e.id ? { ...x, essence: x.essence - cost, actionsLeft: x.actionsLeft - 1 } : x));
+  // zużyj akcję i esencję
+  setEnemies(prev =>
+    prev.map(x =>
+      x.id === e.id ? { ...x, essence: x.essence - cost, actionsLeft: x.actionsLeft - 1 } : x
+    )
+  );
 
-    // helper: zadaj magiczne obrażenia pojedynczemu celowi (postać)
-    const magicDamageToChar = (charIndex, dmg) => {
-      setSets(prev => prev.map((c, i) => {
+  // helper: zadaj magiczne obrażenia postaci
+  const magicDamageToChar = (charIndex, dmg) => {
+    setSets(prev =>
+      prev.map((c, i) => {
         if (i !== charIndex) return c;
-        // redukcja obroną magii postaci
         const reduced = Math.max(0, dmg - Number(c.magicDefense || 0));
         let hp = Math.max(0, (c.hp || 0) - reduced);
 
-        // Faeykai maska
         if (c.race === "Faeykai") {
           const thresh = Math.ceil((c.maxHp || 20) * 0.1);
           if (hp < thresh) c.faeykaiMaskBroken = true;
         }
 
         return { ...c, hp };
-      }));
-    };
-
-    if (e.type === "elfCultist") {
-      if (spellName === "Mroczny Pakt") {
-        // cel może być wróg lub gracz – w UI dajemy targetIndexes jako [indexGracza] (w tej wersji: gracz)
-        const t = targetIndexes?.[0] ?? 0;
-        magicDamageToChar(t, 4);
-        // +4 do Trafienia dla celu (buff na 3 tury)
-        setSets(prev => prev.map((c, i) => i === t ? { ...c, effects: [...(c.effects||[]), { type:"buffHit", value:4, turnsLeft:3 }] } : c));
-        addLog(`🕯️ ${e.name} rzuca Mroczny Pakt → Postać ${t+1}: -4 HP, +4 Trafienie (3 tury).`);
-        return;
-      }
-      if (spellName === "Wyssanie życia") {
-        const t = targetIndexes?.[0] ?? 0;
-        magicDamageToChar(t, 5);
-        setEnemies(prev => prev.map(x => x.id === e.id ? { ...x, hp: Math.min(x.maxHp, x.hp + 5) } : x));
-        addLog(`🩸 ${e.name} wyssał życie → Postać ${t+1}: -5 HP, ${e.name} +5 HP.`);
-        return;
-      }
-      if (spellName === "Magiczny pocisk") {
-        const t = targetIndexes?.[0] ?? 0;
-        const roll = d(6);
-        magicDamageToChar(t, roll);
-        addLog(`✨ ${e.name} rzuca Magiczny pocisk → Postać ${t+1}: -${roll} HP (magia).`);
-        return;
-      }
-    }
-
-    if (e.type === "spy") {
-      if (spellName === "Magiczny pocisk") {
-        const t = targetIndexes?.[0] ?? 0;
-        const roll = d(6);
-        magicDamageToChar(t, roll);
-        addLog(`✨ ${e.name} rzuca Magiczny pocisk → Postać ${t+1}: -${roll} HP (magia).`);
-        return;
-      }
-      if (spellName === "Wybuch energii") {
-        // obszarowe: można wybrać kilka celów; jeśli brak, trafia wszystkich graczy
-        const targets = (targetIndexes && targetIndexes.length) ? targetIndexes : [0,1,2,3].filter(i => sets[i]);
-        const roll = d(4);
-        targets.forEach(idx => magicDamageToChar(idx, roll));
-        addLog(`💥 ${e.name} rzuca Wybuch energii → Postacie ${targets.map(i=>i+1).join(", ")}: -${roll} HP (magia).`);
-        return;
-      }
-    }
-
-    addLog(`🤔 ${e.name} próbuje rzucić nieznane zaklęcie: ${spellName}.`);
+      })
+    );
   };
+
+  // ===== WYBUCH ENERGII =====
+  if (spellName === "Wybuch energii") {
+    const roll = d(4);
+
+    // jeśli wybrano cele w UI (aoeTargets), to tylko one; inaczej — wszystkie postacie
+    const charTargets = aoeTargets.chars.length ? aoeTargets.chars : [0,1,2,3].filter(i => sets[i]);
+    const enemyTargets = aoeTargets.enemies.length ? aoeTargets.enemies : [];
+
+    charTargets.forEach(idx => magicDamageToChar(idx, roll));
+    enemyTargets.forEach(id => {
+      setEnemies(prev => prev.map(en =>
+        en.id === id ? { ...en, hp: Math.max(0, en.hp - roll) } : en
+      ));
+    });
+
+    addLog(`💥 ${e.name} rzuca Wybuch energii: ${charTargets.length} postaci i ${enemyTargets.length} wrogów otrzymuje −${roll} HP (magia).`);
+    return;
+  }
+
+  // ===== INNE CZARY (jak było) =====
+  if (e.type === "elfCultist") {
+    if (spellName === "Mroczny Pakt") {
+      const t = targetIndexes?.[0] ?? 0;
+      magicDamageToChar(t, 4);
+      setSets(prev =>
+        prev.map((c, i) =>
+          i === t
+            ? {
+                ...c,
+                effects: [...(c.effects || []), { type: "buffHit", value: 4, turnsLeft: 3 }],
+              }
+            : c
+        )
+      );
+      addLog(`🕯️ ${e.name} rzuca Mroczny Pakt → Postać ${t+1}: -4 HP, +4 Trafienie (3 tury).`);
+      return;
+    }
+    if (spellName === "Wyssanie życia") {
+      const t = targetIndexes?.[0] ?? 0;
+      magicDamageToChar(t, 5);
+      setEnemies(prev =>
+        prev.map(x =>
+          x.id === e.id ? { ...x, hp: Math.min(x.maxHp, x.hp + 5) } : x
+        )
+      );
+      addLog(`🩸 ${e.name} wyssał życie → Postać ${t+1}: -5 HP, ${e.name} +5 HP.`);
+      return;
+    }
+    if (spellName === "Magiczny pocisk") {
+      const t = targetIndexes?.[0] ?? 0;
+      const roll = d(6);
+      magicDamageToChar(t, roll);
+      addLog(`✨ ${e.name} rzuca Magiczny pocisk → Postać ${t+1}: -${roll} HP (magia).`);
+      return;
+    }
+  }
+
+  if (e.type === "spy") {
+    if (spellName === "Magiczny pocisk") {
+      const t = targetIndexes?.[0] ?? 0;
+      const roll = d(6);
+      magicDamageToChar(t, roll);
+      addLog(`✨ ${e.name} rzuca Magiczny pocisk → Postać ${t+1}: -${roll} HP (magia).`);
+      return;
+    }
+  }
+
+  addLog(`🤔 ${e.name} próbuje rzucić nieznane zaklęcie: ${spellName}.`);
+};
+
 
   /* ===== PODNIEŚ SOJUSZNIKA ===== */
   const reviveAlly = (casterIndex, targetIndex) => {
@@ -1276,37 +1353,94 @@ const nextTurn = () => {
               </div>
             </div>
 
-            <div style={{ borderTop: "1px solid #eee", paddingTop: 8, marginTop: 8 }}>
-              <h4>Zaklęcia</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-                <label>Zaklęcie
-                  <select value={selectedSpellName} onChange={(e)=>setSelectedSpellName(e.target.value)}>
-                    {Object.keys(SPELLS).map((n)=> <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </label>
-                <label>Cel (wróg)
-                  <select value={chosenEnemyId || ""} onChange={(e)=>setChosenEnemyId(e.target.value || null)} disabled={selectedSpellName==="Zasklepienie ran"}>
-                    <option value="">—</option>
-                    {enemies.map((en)=> <option key={en.id} value={en.id}>{en.name}</option>)}
-                  </select>
-                </label>
-                <label>Esencja (aktywny) <input type="number" value={getActiveStats().essence} readOnly /></label>
-              </div>
-              {selectedSpellName === "Zasklepienie ran" && (
-                <div style={{ marginTop: 6 }}>
-                  <label>Cel leczenia:
-                    <select value={healTarget} onChange={(e)=>setHealTarget(Number(e.target.value))}>
-                      {sets.map((_, idx)=> <option key={idx} value={idx}>Postać {idx+1}</option>)}
-                    </select>
-                  </label>
-                </div>
-              )}
-              <div style={{ marginTop: 8 }}>
-                <button onClick={castSelectedSpell}>✨ Rzuć zaklęcie</button>
-              </div>
-            </div>
-          </div>
-        </div>
+<div style={{ borderTop: "1px solid #eee", paddingTop: 8, marginTop: 8 }}>
+  <h4>Zaklęcia</h4>
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+    <label>Zaklęcie
+      <select value={selectedSpellName} onChange={(e)=>setSelectedSpellName(e.target.value)}>
+        {Object.keys(SPELLS).map((n)=> <option key={n} value={n}>{n}</option>)}
+      </select>
+    </label>
+    <label>Cel (wróg)
+      <select 
+        value={chosenEnemyId || ""} 
+        onChange={(e)=>setChosenEnemyId(e.target.value || null)} 
+        disabled={selectedSpellName==="Zasklepienie ran" || selectedSpellName==="Wybuch energii"}
+      >
+        <option value="">—</option>
+        {enemies.map((en)=> <option key={en.id} value={en.id}>{en.name}</option>)}
+      </select>
+    </label>
+    <label>Esencja (aktywny) <input type="number" value={getActiveStats().essence} readOnly /></label>
+  </div>
+
+  {/* Cel leczenia dla Zasklepienie ran */}
+  {selectedSpellName === "Zasklepienie ran" && (
+    <div style={{ marginTop: 6 }}>
+      <label>Cel leczenia:
+        <select value={healTarget} onChange={(e)=>setHealTarget(Number(e.target.value))}>
+          {sets.map((_, idx)=> <option key={idx} value={idx}>Postać {idx+1}</option>)}
+        </select>
+      </label>
+    </div>
+  )}
+
+  {/* Cele dla Wybuchu energii */}
+  {selectedSpellName === "Wybuch energii" && (
+    <div style={{ marginTop: 6, padding: "6px 8px", border: "1px solid #ccc", borderRadius: 6 }}>
+      <strong>🎯 Cele zaklęcia „Wybuch energii”:</strong>
+
+      {/* Postacie */}
+      <div style={{ marginTop: 4 }}>
+        <em>Postacie:</em>
+        {sets.map((s, idx) => (
+          <label key={idx} style={{ marginLeft: 8 }}>
+            <input
+              type="checkbox"
+              checked={aoeTargets.chars.includes(idx)}
+              onChange={(e) => {
+                setAoeTargets(prev => ({
+                  ...prev,
+                  chars: e.target.checked
+                    ? [...prev.chars, idx]
+                    : prev.chars.filter(i => i !== idx),
+                }));
+              }}
+            />
+            {s.name || `Postać ${idx+1}`}
+          </label>
+        ))}
+      </div>
+
+      {/* Wrogowie */}
+      <div style={{ marginTop: 4 }}>
+        <em>Wrogowie:</em>
+        {enemies.map(en => (
+          <label key={en.id} style={{ marginLeft: 8 }}>
+            <input
+              type="checkbox"
+              checked={aoeTargets.enemies.includes(en.id)}
+              onChange={(e) => {
+                setAoeTargets(prev => ({
+                  ...prev,
+                  enemies: e.target.checked
+                    ? [...prev.enemies, en.id]
+                    : prev.enemies.filter(id => id !== en.id),
+                }));
+              }}
+            />
+            {en.name}
+          </label>
+        ))}
+      </div>
+    </div>
+  )}
+
+  <div style={{ marginTop: 8 }}>
+    <button onClick={castSelectedSpell}>✨ Rzuć zaklęcie</button>
+  </div>
+</div>
+
 
         {/* ŚRODKOWA KOLUMNA — WROGOWIE */}
         <div>
@@ -1330,39 +1464,99 @@ const nextTurn = () => {
 
           {enemies.length === 0 && <div style={{ color:"#777" }}>Brak wrogów — dodaj ich powyżej.</div>}
 
-          {enemies.map((e) => (
-            <div key={e.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, marginBottom: 8, background: chosenEnemyId === e.id ? "#eef" : "#fff" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <input type="radio" name="enemy" checked={chosenEnemyId === e.id} onChange={()=>setChosenEnemyId(e.id)} />
-                <strong>{e.name}</strong>
-              </label>
-              <div>❤️ HP: {e.hp}/{e.maxHp} | 🔮 Esencja: {e.essence}/{e.maxEssence} | 🎯 Trafienie: {e.toHit} | Akcje: {e.actionsLeft}</div>
-              <div>🛡 Obrona: {e.defense} (efektywna: {effectiveEnemyDefense(e.id)}) | Pancerz: {e.armor} (ef: {effectiveEnemyArmor(e.id)}) | Obr. magii: {e.magicDefense}</div>
-              <div>Efekty: 🌀 Ogłuszenie {e.stun}t | ☠ Przeklęty {e.curse}t | Obrona −{e.defenseDebuff.value} ({e.defenseDebuff.turns}t) | Pancerz ×{e.armorDebuff.factor} ({e.armorDebuff.turns}t)</div>
+{enemies.map((e) => (
+  <div 
+    key={e.id} 
+    style={{ 
+      border: "1px solid #ddd", 
+      borderRadius: 8, 
+      padding: 8, 
+      marginBottom: 8, 
+      background: chosenEnemyId === e.id ? "#eef" : "#fff" 
+    }}
+  >
+    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <input 
+        type="radio" 
+        name="enemy" 
+        checked={chosenEnemyId === e.id} 
+        onChange={()=>setChosenEnemyId(e.id)} 
+      />
+      <strong>{e.name}</strong>
+    </label>
 
-              <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <button onClick={() => setChosenEnemyId(e.id)}>🎯 Ustaw jako cel</button>
-                {/* przykładowe szybkie akcje wroga */}
-                <button onClick={() => enemyAttack(e.id, activeSet, "dagger")} disabled={e.actionsLeft<=0}>
-  ⚔️ Atak (sztylet → aktywna postać)
-</button>
+    <div>
+      ❤️ HP: {e.hp}/{e.maxHp} | 🔮 Esencja: {e.essence}/{e.maxEssence} | 🎯 Trafienie: {e.toHit} | Akcje: {e.actionsLeft}
+    </div>
+    <div>
+      🛡 Obrona: {e.defense} (efektywna: {effectiveEnemyDefense(e.id)}) | 
+      Pancerz: {e.armor} (ef: {effectiveEnemyArmor(e.id)}) | 
+      Obr. magii: {e.magicDefense}
+    </div>
+    <div>
+      Efekty: 🌀 Ogłuszenie {e.stun}t | ☠ Przeklęty {e.curse}t | Obrona −{e.defenseDebuff.value} ({e.defenseDebuff.turns}t) | Pancerz ×{e.armorDebuff.factor} ({e.armorDebuff.turns}t)
+    </div>
 
-                {/* Zaklęcia dostępne dla typu */}
-                {ENEMY_TYPES[e.type].enemySpells.map(sp => (
-                  <button key={sp} onClick={() => {
-                    if (sp === "Wybuch energii") {
-                      // przykład: na wszystkich graczy
-                      enemyCastSpell(e.id, sp, [0,1,2,3].filter(idx=> sets[idx]));
-                    } else {
-                      // w cel: aktywna postać
-                      enemyCastSpell(e.id, sp, [activeSet]);
-                    }
-                  }} disabled={e.actionsLeft<=0 || e.essence <= 0}>✨ {sp}</button>
+    <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <button onClick={() => setChosenEnemyId(e.id)}>🎯 Ustaw jako cel</button>
+      <button onClick={() => enemyAttack(e.id, activeSet, "dagger")} disabled={e.actionsLeft<=0}>
+        ⚔️ Atak (sztylet → aktywna postać)
+      </button>
+
+      {/* 🔹 Zaklęcia */}
+      {ENEMY_TYPES[e.type].enemySpells.map(sp => (
+        <div key={sp} style={{ marginBottom: 6 }}>
+          <button
+            onClick={() => {
+              if (sp === "Wybuch energii") {
+                // jeśli wróg ma wybrane cele → tylko te; w przeciwnym razie wszyscy gracze
+                const chosen = enemyAoeTargets[e.id]?.length
+                  ? enemyAoeTargets[e.id]
+                  : [0,1,2,3].filter(idx => sets[idx]);
+                enemyCastSpell(e.id, sp, chosen);
+              } else {
+                enemyCastSpell(e.id, sp, [activeSet]);
+              }
+            }}
+            disabled={e.actionsLeft<=0 || e.essence <= 0}
+          >
+            ✨ {sp}
+          </button>
+
+          {/* 🔹 UI tylko dla Wybuchu energii */}
+          {sp === "Wybuch energii" && (
+            <div style={{ marginTop: 4, marginLeft: 12, padding: "4px 6px", border: "1px solid #ccc", borderRadius: 6 }}>
+              <small>🎯 Wybierz cele:</small>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
+                {sets.map((s, idx) => (
+                  <label key={idx}>
+                    <input
+                      type="checkbox"
+                      checked={enemyAoeTargets[e.id]?.includes(idx) || false}
+                      onChange={(ev) => {
+                        setEnemyAoeTargets(prev => {
+                          const current = prev[e.id] || [];
+                          return {
+                            ...prev,
+                            [e.id]: ev.target.checked
+                              ? [...current, idx]
+                              : current.filter(i => i !== idx)
+                          };
+                        });
+                      }}
+                    />
+                    {s.name || `Postać ${idx+1}`}
+                  </label>
                 ))}
               </div>
             </div>
-          ))}
+          )}
         </div>
+      ))}
+    </div>
+  </div>
+))}
+
 
         {/* PRAWA KOLUMNA — INFO / SZYBKIE AKCJE WROGA */}
         <div>
