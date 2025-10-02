@@ -495,18 +495,22 @@ const useClassPower = (i) => {
     spendAction(activeSet);
     if (!hit) return;
 
-    // obrażenia
-    const rawDie = d(w.dmgDie);
-    const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
-    const raw = rawDie + humanDmgBonus;
-    const effArmor = effectiveEnemyArmor(chosenEnemyId);
-    const afterArmor = Math.max(0, raw - effArmor);
+// obrażenia
+const rawDie = d(w.dmgDie);
+const mod = statMod(statVal); // 🔹 modyfikator ze statystyki przypisanej do broni
+const humanDmgBonus = c.race === "Człowiek" && c.humanBuff?.type === "dmg" ? 2 : 0;
 
-    addLog(
-      `🗡️ Obrażenia: k${w.dmgDie}=${rawDie}` +
-      (humanDmgBonus ? ` + human(+2)` : "") +
-      ` = ${raw} − Pancerz(${effArmor}) = ${afterArmor}`
-    );
+const raw = rawDie + mod + humanDmgBonus;
+const effArmor = effectiveEnemyArmor(chosenEnemyId);
+const afterArmor = Math.max(0, raw - effArmor);
+
+addLog(
+  `🗡️ Obrażenia: k${w.dmgDie}=${rawDie} + mod(${w.stat})=${mod}` +
+  (humanDmgBonus ? ` + human(+2)` : "") +
+  ` = ${raw} − Pancerz(${effArmor}) = ${afterArmor}`
+);
+
+damageEnemy(chosenEnemyId, afterArmor);
 
     // Łucznik debuff
     if (c.clazz === "Łucznik" && c.archerReady && weapon === "bow") {
@@ -1386,4 +1390,3 @@ const nextTurn = () => {
     </div>
   );
 }
-
