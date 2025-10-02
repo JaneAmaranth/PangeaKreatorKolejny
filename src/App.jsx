@@ -662,7 +662,7 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
   if (!e) return addLog("❌ Nie znaleziono wroga.");
   if (e.actionsLeft <= 0) return addLog(`❌ ${e.name} nie ma akcji.`);
 
-  // 🔹 sprawdzamy, czy wróg ma wymuszony atak (Dyplomata)
+  // wymuszenie przez Dyplomatę
   if (e.forcedTarget) {
     if (e.forcedTarget.type === "enemy") {
       const victim = getEnemy(e.forcedTarget.value);
@@ -670,13 +670,19 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
 
       const w = weaponData[weaponKey];
       const roll20 = d(20);
-      const toHit = roll20 + e.toHit;
-      const effDefense = effectiveEnemyDefense(victim.id);
-      const hit = toHit >= effDefense;
+      const penalty = (e.curse > 0 ? 3 : 0) + (e.blind > 0 ? 5 : 0);
+      const threshold = e.toHit + penalty;
+      const hit = roll20 >= threshold;
 
-      addLog(`🤺 ${e.name} (wymuszony) atakuje ${victim.name} → k20=${roll20}+${e.toHit} = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`);
+      addLog(
+        `🤺 ${e.name} (wymuszony) atakuje ${victim.name} → k20=${roll20} vs próg ${threshold} → ${hit ? "✅" : "❌"}`
+      );
 
-      setEnemies(prev => prev.map(x => x.id === e.id ? { ...x, actionsLeft: x.actionsLeft - 1, forcedTarget: null } : x));
+      setEnemies(prev =>
+        prev.map(x =>
+          x.id === e.id ? { ...x, actionsLeft: x.actionsLeft - 1, forcedTarget: null } : x
+        )
+      );
 
       if (hit) {
         const raw = d(w.dmgDie);
@@ -687,6 +693,90 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
       return;
     }
   }
+
+  // ogłuszenie
+  if (e.stun > 0) {
+    addLog(`🌀 ${e.name} jest ogłuszony (pozostało ${e.stun} tur).`);
+    return;
+  }
+
+  const w = weaponData[weaponKey];
+  const roll20 = d(20);
+  const penalty = (e.curse > 0 ? 3 : 0) + (e.blind > 0 ? 5 : 0);
+  const threshold = e.toHit + penalty;
+  const hit = roll20 >= threshold;
+
+  const target = sets[targetIndex];
+  if (!target) return addLog("❌ Brak celu (postać).");
+
+  addLog(
+    `👹 ${e.name} atakuje (${w.name}) → k20=${roll20}` +
+    (penalty ? ` (kary: ${penalty})` : "") +
+    ` vs próg trafienia ${threshold} → ${hit ? "✅" : "❌"}`
+  );
+
+  setEnemies(prev =>
+    prev.map(x =>
+      x.id === e.id ? { ...x, actionsLeft: x.actionsLeft - 1, forcedTarget: null } : x
+    )
+  );
+
+  if (!hit) return;
+
+  // obrażenia
+  let incoming = d(w.dmgDie);
+  addLog(`💥 Rzut obrażeń: k${w.dmgDie}=${incoming}`);
+
+  // krasnolud w hibernacji
+  if (target.dwarfHibernating) {
+    addLog(`🛌 Postać ${targetIndex + 1} hibernuje — obrażenia zignorowane.`);
+    return;
+  }
+
+  incoming = Math.max(0, incoming - Number(target.armor || 0));
+  let reflected = 0;
+
+  // tarcza maga
+  setSets(prev =>
+    prev.map((c, i) => {
+      if (i !== targetIndex) return c;
+      let useShield = 0;
+      if ((c.mageShield || 0) > 0 && incoming > 0) {
+        useShield = Math.min(c.mageShield, incoming);
+        reflected = useShield;
+        incoming = Math.max(0, incoming - useShield);
+      }
+      const before = c.hp;
+      let hp = Math.max(0, before - incoming);
+
+      if (c.race === "Faeykai") {
+        const thresh = Math.ceil((c.maxHp || 20) * 0.1);
+        if (hp < thresh) c.faeykaiMaskBroken = true;
+      }
+
+      if (c.race === "Krasnolud" && c.dwarfPassiveArmed && before > 0 && hp <= 0) {
+        hp = 0;
+        return {
+          ...c,
+          hp,
+          dwarfHibernating: true,
+          dwarfHibernateTurns: 2,
+          mageShield: Math.max(0, (c.mageShield || 0) - useShield),
+        };
+      }
+
+      return { ...c, hp, mageShield: Math.max(0, (c.mageShield || 0) - useShield) };
+    })
+  );
+
+  if (reflected > 0) {
+    damageEnemy(e.id, reflected);
+    addLog(`🔮 Tarcza Maga odbija ${reflected} do ${e.name}.`);
+  }
+
+  if (incoming > 0) addLog(`❤️ Postać ${targetIndex + 1} otrzymuje ${incoming} obrażeń po pancerzu.`);
+};
+
 
   // 🔹 standardowy atak na gracza
   if (e.stun > 0) {
