@@ -361,83 +361,93 @@ export default function BattleSimulator() {
   };
 
   /* ===== KLASOWE: aktywacje ===== */
-  const useClassPower = (i) => {
-    const c = sets[i];
-    if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji.");
-    if (c.classUsed) return addLog("❌ Umiejętność klasowa już użyta w tym odpoczynku.");
+const useClassPower = (i) => {
+  const c = sets[i];
+  if ((c.actionsLeft || 0) <= 0) return addLog("❌ Brak akcji.");
+  if (c.classUsed) return addLog("❌ Umiejętność klasowa już użyta w tym odpoczynku.");
 
-    if (c.clazz === "Wojownik") {
-      setSets((prev) => {
-        const next = [...prev];
-        const me = { ...next[i] };
-        me.classUsed = true;
-        me.warriorReady = true;
-        me.actionsLeft -= 1;
-        next[i] = me;
-        return next;
-      });
-      addLog(`🎖️ Wojownik (Postać ${i + 1}): przygotował „maksymalny cios”.`);
-      return;
-    }
+  if (c.clazz === "Wojownik") {
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      me.classUsed = true;
+      me.warriorReady = true;
+      me.actionsLeft -= 1;
+      next[i] = me;
+      return next;
+    });
+    addLog(`🎖️ Wojownik (Postać ${i + 1}): przygotował „maksymalny cios”.`);
+    return;
+  }
 
-    if (c.clazz === "Łucznik") {
-      setSets((prev) => {
-        const next = [...prev];
-        const me = { ...next[i] };
-        me.classUsed = true;
-        me.archerReady = true;
-        me.actionsLeft -= 1;
-        next[i] = me;
-        return next;
-      });
-      addLog(`🏹 Łucznik (Postać ${i + 1}): „celny strzał” — po następnym trafieniu łukiem Obrona celu −5 (3 tury).`);
-      return;
-    }
+  if (c.clazz === "Łucznik") {
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      me.classUsed = true;
+      me.archerReady = true;
+      me.actionsLeft -= 1;
+      next[i] = me;
+      return next;
+    });
+    addLog(`🏹 Łucznik (Postać ${i + 1}): „celny strzał” — po następnym trafieniu łukiem Obrona celu −5 (3 tury).`);
+    return;
+  }
 
-    if (c.clazz === "Strzelec") {
-      setSets((prev) => {
-        const next = [...prev];
-        const me = { ...next[i] };
-        me.classUsed = true;
-        me.shooterReady = true;
-        me.actionsLeft -= 1;
-        next[i] = me;
-        return next;
-      });
-      addLog(`🔫 Strzelec (Postać ${i + 1}): „druzgocący strzał” — po następnym trafieniu muszkietem pancerz celu ×0.5 (3 tury).`);
-      return;
-    }
+  if (c.clazz === "Strzelec") {
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      me.classUsed = true;
+      me.shooterReady = true;
+      me.actionsLeft -= 1;
+      next[i] = me;
+      return next;
+    });
+    addLog(`🔫 Strzelec (Postać ${i + 1}): „druzgocący strzał” — po następnym trafieniu muszkietem pancerz celu ×0.5 (3 tury).`);
+    return;
+  }
 
-    if (c.clazz === "Mag") {
-      setSets((prev) => {
-        const next = [...prev];
-        const me = { ...next[i] };
-        me.classUsed = true;
-        me.mageReady = true;
-        me.actionsLeft -= 1;
-        next[i] = me;
-        return next;
-      });
-      addLog(`🔮 Mag (Postać ${i + 1}): „tarcza” — po następnym czarze z obrażeniami tarcza = 50% zadanych obrażeń.`);
-      return;
-    }
+  if (c.clazz === "Mag") {
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      me.classUsed = true;
+      me.mageReady = true;
+      me.actionsLeft -= 1;
+      next[i] = me;
+      return next;
+    });
+    addLog(`🔮 Mag (Postać ${i + 1}): „tarcza” — po następnym czarze z obrażeniami tarcza = 50% zadanych obrażeń.`);
+    return;
+  }
 
-    if (c.clazz === "Dyplomata") {
-      if (!diploEnemyId) return addLog("❌ Wybierz wroga (instancję) do wymuszenia celu.");
-      setEnemies(prev => prev.map(e => e.id === diploEnemyId ? { ...e, forcedTarget: diploTarget } : e));
-      setSets((prev) => {
-        const next = [...prev];
-        const me = { ...next[i] };
-        me.classUsed = true;
-        me.actionsLeft -= 1;
-        next[i] = me;
-        return next;
-      });
-      const en = getEnemy(diploEnemyId);
-      addLog(`🗣️ Dyplomata (Postać ${i + 1}) zmusza ${en?.name||diploEnemyId} do zaatakowania Postaci ${diploTarget + 1} przy jego następnym ataku.`);
-      return;
-    }
-  };
+  if (c.clazz === "Dyplomata") {
+    // 🔹 teraz Dyplomata wybiera wroga i zmusza go do zaatakowania innego wroga
+    if (!diploEnemyId || !diploTarget) return addLog("❌ Wybierz wroga i cel (innego wroga).");
+
+    setEnemies(prev => prev.map(e => 
+      e.id === diploEnemyId 
+        ? { ...e, forcedTarget: { type: "enemy", value: diploTarget } } // 🔹
+        : e
+    ));
+
+    setSets((prev) => {
+      const next = [...prev];
+      const me = { ...next[i] };
+      me.classUsed = true;
+      me.actionsLeft -= 1;
+      next[i] = me;
+      return next;
+    });
+
+    const en = getEnemy(diploEnemyId);
+    const targetEn = getEnemy(diploTarget);
+    addLog(`🗣️ Dyplomata (Postać ${i + 1}) zmusza ${en?.name || diploEnemyId} do zaatakowania ${targetEn?.name || diploTarget} przy jego następnym ataku.`);
+    return;
+  }
+};
+
 
   /* ===== WALKA: Atak fizyczny (GRACZ) ===== */
   const doAttack = () => {
@@ -605,88 +615,103 @@ export default function BattleSimulator() {
   };
 
   /* ===== ATAK WROGA (broń) ===== */
-  const enemyAttack = (enemyId, targetIndex, weaponKey) => {
-    const e = getEnemy(enemyId);
-    if (!e) return addLog("❌ Nie znaleziono wroga.");
-    if (e.actionsLeft <= 0) return addLog(`❌ ${e.name} nie ma akcji.`);
+const enemyAttack = (enemyId, targetIndex, weaponKey) => {
+  const e = getEnemy(enemyId);
+  if (!e) return addLog("❌ Nie znaleziono wroga.");
+  if (e.actionsLeft <= 0) return addLog(`❌ ${e.name} nie ma akcji.`);
 
-    // wymuszenie celu jednorazowe (Dyplomata)
-    const overriddenTarget = (e.forcedTarget !== null && e.forcedTarget !== undefined) ? e.forcedTarget : targetIndex;
+  // 🔹 sprawdzamy, czy Dyplomata zmusił go do ataku
+  if (e.forcedTarget) {
+    if (e.forcedTarget.type === "enemy") {
+      const victim = getEnemy(e.forcedTarget.value);
+      if (!victim) return addLog("❌ Cel (wróg) nie istnieje.");
 
-    if (e.stun > 0) {
-      addLog(`🌀 ${e.name} jest ogłuszony (pozostało ${e.stun} tur).`);
+      const w = weaponData[weaponKey];
+      const roll20 = d(20);
+      const toHit = roll20 + e.toHit;
+      const effDefense = effectiveEnemyDefense(victim.id);
+      const hit = toHit >= effDefense;
+
+      addLog(`🤺 ${e.name} (wymuszony) atakuje ${victim.name} → k20=${roll20}+${e.toHit} = ${toHit} vs Obrona ${effDefense} → ${hit ? "✅" : "❌"}`);
+
+      setEnemies(prev => prev.map(x => x.id === e.id ? { ...x, actionsLeft: x.actionsLeft - 1, forcedTarget: null } : x));
+
+      if (hit) {
+        const raw = d(w.dmgDie);
+        const dmg = Math.max(0, raw - effectiveEnemyArmor(victim.id));
+        addLog(`💥 Obrażenia: k${w.dmgDie}=${raw} − pancerz(${effectiveEnemyArmor(victim.id)}) = ${dmg}`);
+        damageEnemy(victim.id, dmg);
+      }
       return;
     }
+  }
 
-    const w = weaponData[weaponKey];
-    const roll20 = d(20);
-    const needDelta = (e.curse > 0 ? 3 : 0); // przekleństwo utrudnia trafienie
-    const toHit = roll20 + e.toHit - needDelta;
+  // 🔹 standardowy atak na gracza (jak wcześniej)
+  const overriddenTarget = targetIndex;
+  if (e.stun > 0) {
+    addLog(`🌀 ${e.name} jest ogłuszony (pozostało ${e.stun} tur).`);
+    return;
+  }
 
-    const target = sets[overriddenTarget];
-    if (!target) return addLog("❌ Brak celu (postać).");
+  const w = weaponData[weaponKey];
+  const roll20 = d(20);
+  const needDelta = (e.curse > 0 ? 3 : 0);
+  const toHit = roll20 + e.toHit - needDelta;
 
-    // uproszczona obrona postaci: 10 + DEX (jeśli chcesz same 10 – zmień)
-    const defenseThreshold = 10 + (Number(target.DEX ?? 0));
-    const hit = toHit >= defenseThreshold;
+  const target = sets[overriddenTarget];
+  if (!target) return addLog("❌ Brak celu (postać).");
 
-    addLog(
-      `👹 ${e.name} atakuje (${w.name}) → k20=${roll20} + toHit(${e.toHit})` +
-      (needDelta ? ` − przeklęstwo(${needDelta})` : "") +
-      ` = ${toHit} vs próg ${defenseThreshold} → ${hit ? "✅" : "❌"}`
-    );
+  const defenseThreshold = 10 + (Number(target.DEX ?? 0));
+  const hit = toHit >= defenseThreshold;
 
-    // zużyj akcję i skonsumuj jednorazowe wymuszenie celu
-    setEnemies(prev => prev.map(x => x.id === e.id ? { ...x, actionsLeft: x.actionsLeft - 1, forcedTarget: null } : x));
-    if (!hit) return;
+  addLog(
+    `👹 ${e.name} atakuje (${w.name}) → k20=${roll20} + toHit(${e.toHit})` +
+    (needDelta ? ` − przeklęstwo(${needDelta})` : "") +
+    ` = ${toHit} vs próg ${defenseThreshold} → ${hit ? "✅" : "❌"}`
+  );
 
-    // obrażenia fizyczne — redukcja pancerzem celu
-    let incoming = d(w.dmgDie);
-    addLog(`💥 Rzut obrażeń: k${w.dmgDie}=${incoming}`);
+  setEnemies(prev => prev.map(x => x.id === e.id ? { ...x, actionsLeft: x.actionsLeft - 1, forcedTarget: null } : x));
+  if (!hit) return;
 
-    // Krasnolud hibernacja → ignoruje obrażenia
-    if (target.dwarfHibernating) {
-      addLog(`🛌 Postać ${overriddenTarget + 1} hibernuje — obrażenia zignorowane.`);
-      return;
+  let incoming = d(w.dmgDie);
+  addLog(`💥 Rzut obrażeń: k${w.dmgDie}=${incoming}`);
+
+  if (target.dwarfHibernating) {
+    addLog(`🛌 Postać ${overriddenTarget + 1} hibernuje — obrażenia zignorowane.`);
+    return;
+  }
+
+  incoming = Math.max(0, incoming - Number(target.armor || 0));
+  let reflected = 0;
+
+  setSets(prev => prev.map((c, i) => {
+    if (i !== overriddenTarget) return c;
+    let useShield = 0;
+    if ((c.mageShield || 0) > 0 && incoming > 0) {
+      useShield = Math.min(c.mageShield, incoming);
+      reflected = useShield;
+      incoming = Math.max(0, incoming - useShield);
     }
-
-    incoming = Math.max(0, incoming - Number(target.armor || 0));
-    let reflected = 0;
-
-    // tarcza Maga
-    setSets(prev => prev.map((c, i) => {
-      if (i !== overriddenTarget) return c;
-      let useShield = 0;
-      if ((c.mageShield || 0) > 0 && incoming > 0) {
-        useShield = Math.min(c.mageShield, incoming);
-        reflected = useShield;
-        incoming = Math.max(0, incoming - useShield);
-      }
-      const before = c.hp;
-      let hp = Math.max(0, before - incoming);
-
-      // Faeykai maska
-      if (c.race === "Faeykai") {
-        const thresh = Math.ceil((c.maxHp || 20) * 0.1);
-        if (hp < thresh) c.faeykaiMaskBroken = true;
-      }
-
-      // Krasnolud: jeśli uzbrojony i spada do 0 → hibernacja 2 tury
-      if (c.race === "Krasnolud" && c.dwarfPassiveArmed && before > 0 && hp <= 0) {
-        hp = 0;
-        return { ...c, hp, dwarfHibernating: true, dwarfHibernateTurns: 2, mageShield: Math.max(0, (c.mageShield||0) - useShield) };
-      }
-
-      return { ...c, hp, mageShield: Math.max(0, (c.mageShield||0) - useShield) };
-    }));
-
-    if (reflected > 0) {
-      damageEnemy(e.id, reflected);
-      addLog(`🔮 Tarcza Maga odbija ${reflected} do ${e.name}.`);
+    const before = c.hp;
+    let hp = Math.max(0, before - incoming);
+    if (c.race === "Faeykai") {
+      const thresh = Math.ceil((c.maxHp || 20) * 0.1);
+      if (hp < thresh) c.faeykaiMaskBroken = true;
     }
+    if (c.race === "Krasnolud" && c.dwarfPassiveArmed && before > 0 && hp <= 0) {
+      hp = 0;
+      return { ...c, hp, dwarfHibernating: true, dwarfHibernateTurns: 2, mageShield: Math.max(0, (c.mageShield||0) - useShield) };
+    }
+    return { ...c, hp, mageShield: Math.max(0, (c.mageShield||0) - useShield) };
+  }));
 
-    if (incoming > 0) addLog(`❤️ Postać ${overriddenTarget + 1} otrzymuje ${incoming} obrażeń po pancerzu.`);
-  };
+  if (reflected > 0) {
+    damageEnemy(e.id, reflected);
+    addLog(`🔮 Tarcza Maga odbija ${reflected} do ${e.name}.`);
+  }
+  if (incoming > 0) addLog(`❤️ Postać ${overriddenTarget + 1} otrzymuje ${incoming} obrażeń po pancerzu.`);
+};
+
 
   /* ===== ZAKLĘCIA WROGÓW =====
      - Wszystkie to ataki magiczne (redukcja Obr.magią celu)
