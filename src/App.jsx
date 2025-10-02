@@ -14,10 +14,13 @@ function statMod(value) {
 
 /* ===== Dane broni ===== */
 const weaponData = {
-  sword:  { name: "Miecz krótki", stat: "STR", dmgDie: 6, type: "physical" },
-  bow:    { name: "Łuk",          stat: "PER", dmgDie: 6, type: "physical" },
-  musket: { name: "Muszkiet",     stat: "PER", dmgDie: 6, type: "physical" },
-  staff:  { name: "Kij magiczny", stat: "MAG", dmgDie: 4, type: "physical" }, // trafienie traktujemy jak fizyczne
+  sword:   { name: "Miecz krótki", stat: "STR", dmgDie: 6, type: "physical" },
+  bow:     { name: "Łuk",          stat: "PER", dmgDie: 6, type: "physical" },
+  musket:  { name: "Muszkiet",     stat: "PER", dmgDie: 8, type: "physical" }, // zmiana na k8
+  staff:   { name: "Kij magiczny", stat: "MAG", dmgDie: 4, type: "physical" }, // trafienie traktowane jak fizyczne
+  crossbow:{ name: "Prosta kusza", stat: "PER", dmgDie: 6, type: "physical" }, // nowa
+  dagger:  { name: "Sztylet",      stat: "STR", dmgDie: 4, type: "physical" }, // nowa
+  fists:   { name: "Pięści",       stat: "STR", dmgDie: 4, type: "physical" }, // nowa
 };
 
 /* ===== Zaklęcia graczy ===== */
@@ -1186,14 +1189,17 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
             <div style={{ borderTop: "1px solid #eee", paddingTop: 8 }}>
               <h4>Atak</h4>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-                <label>Broń
-                  <select value={weapon} onChange={(e)=>setWeapon(e.target.value)}>
-                    <option value="sword">Miecz krótki (STR)</option>
-                    <option value="bow">Łuk (PER)</option>
-                    <option value="musket">Muszkiet (PER)</option>
-                    <option value="staff">Kij magiczny (MAG)</option>
-                  </select>
-                </label>
+<label>Broń
+  <select value={weapon} onChange={(e)=>setWeapon(e.target.value)}>
+    <option value="sword">Miecz krótki (STR)</option>
+    <option value="bow">Łuk (PER)</option>
+    <option value="musket">Muszkiet (PER, k8)</option>
+    <option value="staff">Kij magiczny (MAG)</option>
+    <option value="crossbow">Prosta kusza (PER, k6)</option>
+    <option value="dagger">Sztylet (STR, k4)</option>
+    <option value="fists">Pięści (STR, k4)</option>
+  </select>
+</label>
                 <label>Cel (wróg)
                   <select value={chosenEnemyId || ""} onChange={(e)=>setChosenEnemyId(e.target.value || null)}>
                     <option value="">—</option>
@@ -1275,7 +1281,10 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
               <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <button onClick={() => setChosenEnemyId(e.id)}>🎯 Ustaw jako cel</button>
                 {/* przykładowe szybkie akcje wroga */}
-                <button onClick={() => enemyAttack(e.id, activeSet, "sword")} disabled={e.actionsLeft<=0}>⚔️ Atak (miecz → aktywna postać)</button>
+                <button onClick={() => enemyAttack(e.id, activeSet, "dagger")} disabled={e.actionsLeft<=0}>
+  ⚔️ Atak (sztylet → aktywna postać)
+</button>
+
                 {/* Zaklęcia dostępne dla typu */}
                 {ENEMY_TYPES[e.type].enemySpells.map(sp => (
                   <button key={sp} onClick={() => {
@@ -1299,8 +1308,8 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
           <div style={{ display: "grid", gap: 8 }}>
             <button onClick={()=>{
               if (!chosenEnemyId) return addLog("❌ Wybierz wroga.");
-              enemyAttack(chosenEnemyId, activeSet, "musket");
-            }}>👹 Wybrany wróg strzela do aktywnej (muszkiet)</button>
+              enemyAttack(chosenEnemyId, activeSet, "dagger");
+            }}>👹 Wybrany wróg strzela do aktywnej (sztylet)</button>
 
             <button onClick={()=>{
               if (!chosenEnemyId) return addLog("❌ Wybierz wroga.");
