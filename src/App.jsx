@@ -1074,21 +1074,24 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
               {/* KLASOWE */}
               <div style={{ marginTop: 8, borderTop: "1px dashed #ccc", paddingTop: 8 }}>
                 <strong>Umiejętność klasowa (1×/odp):</strong>
-                {set.clazz === "Dyplomata" && (
-                  <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-                    <label>Wróg:
-                      <select value={diploEnemyId || ""} onChange={(e)=>setDiploEnemyId(e.target.value || null)}>
-                        <option value="">—</option>
-                        {enemies.map((en)=> <option key={en.id} value={en.id}>{en.name}</option>)}
-                      </select>
-                    </label>
-                    <label>Cel (postać):
-                      <select value={diploTarget} onChange={(e)=>setDiploTarget(Number(e.target.value))}>
-                        {sets.map((_, idx)=><option key={idx} value={idx}>Postać {idx+1}</option>)}
-                      </select>
-                    </label>
-                  </div>
-                )}
+{set.clazz === "Dyplomata" && (
+  <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+    <label>Wróg (którego zmuszasz):
+      <select value={diploEnemyId || ""} onChange={(e)=>setDiploEnemyId(e.target.value || null)}>
+        <option value="">—</option>
+        {enemies.map((en)=> <option key={en.id} value={en.id}>{en.name}</option>)}
+      </select>
+    </label>
+    <label>Cel ataku (inny wróg):
+      <select value={diploTarget || ""} onChange={(e)=>setDiploTarget(e.target.value || null)}>
+        <option value="">—</option>
+        {enemies
+          .filter(en => en.id !== diploEnemyId) // 🔹 nie pozwalamy wybrać samego siebie
+          .map((en)=> <option key={en.id} value={en.id}>{en.name}</option>)}
+      </select>
+    </label>
+  </div>
+)}
                 <div style={{ marginTop: 6 }}>
                   <button onClick={() => useClassPower(i)} disabled={set.classUsed} title="1 akcja">
                     {set.classUsed ? "Użyto" : `Użyj (${set.clazz})`}
@@ -1323,3 +1326,4 @@ const enemyAttack = (enemyId, targetIndex, weaponKey) => {
     </div>
   );
 }
+
